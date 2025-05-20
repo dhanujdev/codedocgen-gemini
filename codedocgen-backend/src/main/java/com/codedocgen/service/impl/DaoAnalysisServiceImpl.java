@@ -435,9 +435,10 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
         // Extract relationships (this is a heuristic based on common naming patterns)
         Map<String, Set<String>> relationships = new HashMap<>();
         
-        // Generate entities
+        // Generate entities - using 'entity_' prefix to avoid naming collisions
         for (String table : allTables) {
-            plantUmlBuilder.append("entity \"").append(table).append("\" {\n");
+            String safeTableName = "entity_" + table.replaceAll("[^a-zA-Z0-9_]", "_");
+            plantUmlBuilder.append("entity \"").append(table).append("\" as ").append(safeTableName).append(" {\n");
             plantUmlBuilder.append("  +id : number <<PK>>\n");
             
             // Add placeholder fields, ideally these would be extracted from actual code
@@ -459,11 +460,14 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
             plantUmlBuilder.append("}\n\n");
         }
         
-        // Add relationships
+        // Add relationships - using safe identifiers
         for (Map.Entry<String, Set<String>> entry : relationships.entrySet()) {
             String table = entry.getKey();
+            String safeTable = "entity_" + table.replaceAll("[^a-zA-Z0-9_]", "_");
+            
             for (String relatedTable : entry.getValue()) {
-                plantUmlBuilder.append(table).append(" }o--|| ").append(relatedTable).append("\n");
+                String safeRelatedTable = "entity_" + relatedTable.replaceAll("[^a-zA-Z0-9_]", "_");
+                plantUmlBuilder.append(safeTable).append(" }o--|| ").append(safeRelatedTable).append("\n");
             }
         }
         
@@ -471,8 +475,9 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
         for (Map.Entry<String, List<DaoOperationDetail>> entry : daoOperations.entrySet()) {
             String daoClass = entry.getKey();
             String simpleName = daoClass.contains(".") ? daoClass.substring(daoClass.lastIndexOf('.') + 1) : daoClass;
+            String safeClassName = "class_" + simpleName.replaceAll("[^a-zA-Z0-9_]", "_");
             
-            plantUmlBuilder.append("class \"").append(simpleName).append("\" <<DAO>> {\n");
+            plantUmlBuilder.append("class \"").append(simpleName).append("\" as ").append(safeClassName).append(" <<DAO>> {\n");
             
             // Group operations by table
             Map<String, Set<DaoOperationDetail.SqlOperationType>> tableOps = new HashMap<>();
@@ -504,9 +509,10 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
             
             plantUmlBuilder.append("}\n\n");
             
-            // Connect DAO to its tables
+            // Connect DAO to its tables - using safe identifiers
             for (String table : tableOps.keySet()) {
-                plantUmlBuilder.append(simpleName).append(" ..> ").append(table).append(" : operates on\n");
+                String safeTable = "entity_" + table.replaceAll("[^a-zA-Z0-9_]", "_");
+                plantUmlBuilder.append(safeClassName).append(" ..> ").append(safeTable).append(" : operates on\n");
             }
         }
         
