@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SVG Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; background: #f9f9f9; }
+    #svg-container { width: 100vw; height: 90vh; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px solid #ddd; }
+    #controls { text-align: center; margin: 10px 0; }
+    button { margin: 0 5px; padding: 6px 12px; font-size: 1rem; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+</head>
+<body>
+  <div id="controls">
+    <button onclick="zoomIn()">Zoom In</button>
+    <button onclick="zoomOut()">Zoom Out</button>
+    <button onclick="resetZoom()">Reset</button>
+  </div>
+  <div id="svg-container">
+    <span id="loading">Loading SVG...</span>
+  </div>
+  <script>
+    function getQueryParam(name) {
+      const url = new URL(window.location.href);
+      return url.searchParams.get(name);
+    }
+    const file = getQueryParam('file');
+    if (!file) {
+      document.getElementById('svg-container').innerHTML = '<span style="color:red">No SVG file specified.</span>';
+    } else {
+      fetch(file)
+        .then(resp => resp.text())
+        .then(svgText => {
+          document.getElementById('svg-container').innerHTML = svgText;
+          const svg = document.getElementById('svg-container').querySelector('svg');
+          if (svg) {
+            svg.setAttribute('width', '100%');
+            svg.setAttribute('height', '100%');
+            svg.style.maxWidth = '100vw';
+            svg.style.maxHeight = '90vh';
+            window.panZoom = svgPanZoom(svg, {
+              zoomEnabled: true,
+              controlIconsEnabled: false,
+              fit: true,
+              center: true,
+              minZoom: 0.2,
+              maxZoom: 10,
+              customEventsHandler: null
+            });
+          }
+        })
+        .catch(err => {
+          document.getElementById('svg-container').innerHTML = '<span style="color:red">Failed to load SVG: ' + err + '</span>';
+        });
+    }
+    function zoomIn() { if (window.panZoom) window.panZoom.zoomIn(); }
+    function zoomOut() { if (window.panZoom) window.panZoom.zoomOut(); }
+    function resetZoom() { if (window.panZoom) window.panZoom.resetZoom(); }
+  </script>
+</body>
+</html> 

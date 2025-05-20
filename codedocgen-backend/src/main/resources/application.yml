@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: codedocgen-backend
+server:
+  port: 8080
+
+# Logging configuration
+logging:
+  level:
+    com.codedocgen: INFO
+    org.springframework.web: INFO
+
+# Directory for cloned repositories
+app:
+  repoStoragePath: /tmp/repos # On Windows, this might be C:/tmp/repos or similar. Adjust if needed.
+  outputBasePath: ./output # Relative to project root
+  docsStoragePath: ${app.outputBasePath}/docs
+  diagramsStoragePath: ${app.outputBasePath}/diagrams 

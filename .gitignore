@@ -1,0 +1,104 @@
+# Java Backend
+/codedocgen-backend/target/
+/codedocgen-backend/.mvn/
+/codedocgen-backend/mvnw
+/codedocgen-backend/mvnw.cmd
+/codedocgen-backend/*.iml
+/codedocgen-backend/.idea/
+/codedocgen-backend/.settings/
+/codedocgen-backend/.project
+/codedocgen-backend/.classpath
+/codedocgen-backend/bin/
+/codedocgen-backend/output/
+/codedocgen-backend/.factorypath
+/codedocgen-backend/.springBeans
+/codedocgen-backend/generated-output/
+
+# Maven specific
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# JavaScript / React Frontend
+**/node_modules/
+node_modules/
+/codedocgen-frontend/node_modules/
+/codedocgen-frontend/build/
+/codedocgen-frontend/dist/
+/codedocgen-frontend/coverage/
+/codedocgen-frontend/.env
+/codedocgen-frontend/.env.local
+/codedocgen-frontend/.env.development.local
+/codedocgen-frontend/.env.test.local
+/codedocgen-frontend/.env.production.local
+/codedocgen-frontend/npm-debug.log*
+/codedocgen-frontend/yarn-debug.log*
+/codedocgen-frontend/yarn-error.log*
+/codedocgen-frontend/.pnp/
+/codedocgen-frontend/.pnp.js
+/codedocgen-frontend/.cache/
+/codedocgen-frontend/.eslintcache
+/codedocgen-frontend/.next/
+.next/
+
+# IDE specific
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+*.sw?
+.DS_Store
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
+.history/
+
+# System Files
+.DS_Store
+Thumbs.db
+.directory
+desktop.ini
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Generated output
+/generated-output/
+**/generated-output/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+*.bak
+.temp/
+.tmp/
+
+# Compiled Java classes
+*.class
+
+# Package files
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Frontend cache
+.sass-cache/
+.parcel-cache/ 
