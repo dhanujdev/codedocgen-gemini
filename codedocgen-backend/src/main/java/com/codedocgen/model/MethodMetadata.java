@@ -27,10 +27,13 @@ public class MethodMetadata {
     
     // The following fields are likely superseded by daoOperations. Review for removal.
     /** @deprecated Replaced by {@link #daoOperations} */
+    @Deprecated
     private List<String> sqlQueries; 
     /** @deprecated Replaced by {@link #daoOperations} */
+    @Deprecated
     private List<String> sqlTables; 
     /** @deprecated Replaced by {@link #daoOperations} */
+    @Deprecated
     private List<String> sqlOperations; 
 
     // No explicit constructor or getters/setters for daoOperations needed here.

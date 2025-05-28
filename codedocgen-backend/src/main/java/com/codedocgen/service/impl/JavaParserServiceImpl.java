@@ -68,26 +68,25 @@ public class JavaParserServiceImpl implements JavaParserService {
             if (pomFileForCompile.exists() && pomFileForCompile.isFile()) {
                 logger.info("Found pom.xml, attempting to compile the project via MavenBuildService.");
                 try {
-                    MavenExecutionResult compileResult = mavenBuildService.runMavenCommand(projectDir, "compile", "-DskipTests", "-q");
+                    MavenExecutionResult compileResult = mavenBuildService.runMavenCommandWithExplicitVersion(projectDir, (String) null, "compile", "-DskipTests", "-q");
                     logger.info("Maven 'compile' command finished with exit code: {}", compileResult.getExitCode());
 
                     if (!compileResult.isSuccess()) {
                         logger.warn("Maven compile command failed with exit code {}. Generated sources might be missing or incomplete.", compileResult.getExitCode());
                         String output = compileResult.getOutput();
                         
-                        // Check for specific dependency errors and try to fix them
                         if (output.contains("javax.activation.MimeTypeParseException") || 
                             output.contains("Unable to find artifact") ||
                             output.contains("Dependency resolution failed")) {
                             
                             logger.info("Specific error pattern found in Maven output. Attempting to fix missing dependencies with Maven dependency resolution...");
                             try {
-                                MavenExecutionResult resolveResult = mavenBuildService.runMavenCommand(projectDir, "dependency:resolve", "-U", "-DskipTests", "-q");
+                                MavenExecutionResult resolveResult = mavenBuildService.runMavenCommandWithExplicitVersion(projectDir, (String) null, "dependency:resolve", "-U", "-DskipTests", "-q");
                                 logger.info("Maven 'dependency:resolve' command finished with exit code: {}", resolveResult.getExitCode());
 
                                 if (resolveResult.isSuccess()) {
                                     logger.info("Dependency resolution successful, retrying compilation with -offline...");
-                                    MavenExecutionResult retryCompileResult = mavenBuildService.runMavenCommand(projectDir,
+                                    MavenExecutionResult retryCompileResult = mavenBuildService.runMavenCommandWithExplicitVersion(projectDir, (String) null,
                                             "compile",
                                             "-DskipTests",
                                             "-q",

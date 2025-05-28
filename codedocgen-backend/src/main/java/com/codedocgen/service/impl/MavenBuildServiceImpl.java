@@ -29,39 +29,40 @@ public class MavenBuildServiceImpl implements MavenBuildService {
     private Map<String, String> configuredJdkPaths;
 
     @Override
-    public MavenExecutionResult runMavenCommand(File projectDir, String... goals) throws IOException, InterruptedException {
+    public MavenExecutionResult runMavenCommandWithAutoDetect(File projectDir, String... goals) throws IOException, InterruptedException {
         String detectedJavaVersion = null;
         File pomFile = new File(projectDir, "pom.xml");
         if (pomFile.exists() && pomFile.isFile()) {
             detectedJavaVersion = JavaVersionUtil.detectJavaVersionFromPom(pomFile);
             if (detectedJavaVersion != null) {
-                logger.info("Detected Java version {} for project in {}", detectedJavaVersion, projectDir.getAbsolutePath());
+                logger.info("Auto-detected Java version {} for project in {}", detectedJavaVersion, projectDir.getAbsolutePath());
             } else {
-                logger.warn("Could not detect Java version from pom.xml in {}. Will use system default Maven JDK.", projectDir.getAbsolutePath());
+                logger.warn("Could not auto-detect Java version from pom.xml in {}. Will use system default Maven JDK for auto-detect path.", projectDir.getAbsolutePath());
             }
         } else {
-            logger.warn("No pom.xml found in {}. Cannot detect Java version. Will use system default Maven JDK.", projectDir.getAbsolutePath());
+            logger.warn("No pom.xml found in {}. Cannot auto-detect Java version. Will use system default Maven JDK for auto-detect path.", projectDir.getAbsolutePath());
         }
-        return runMavenCommand(projectDir, detectedJavaVersion, goals);
+        return runMavenCommandWithExplicitVersion(projectDir, detectedJavaVersion, goals);
     }
 
     @Override
-    public MavenExecutionResult runMavenCommand(File projectDir, String detectedJavaVersion, String... goals) throws IOException, InterruptedException {
+    public MavenExecutionResult runMavenCommandWithExplicitVersion(File projectDir, String detectedJavaVersion, String... goalsForExplicit) throws IOException, InterruptedException {
         if (!projectDir.exists() || !projectDir.isDirectory()) {
             String errorMsg = "Project directory " + projectDir.getAbsolutePath() + " does not exist or is not a directory.";
             logger.error(errorMsg);
-            // Still return a MavenExecutionResult to keep method signature consistent
             return new MavenExecutionResult( -1, "Project directory not found: " + projectDir.getAbsolutePath());
         }
 
         String mvnCommand = SystemInfoUtil.isWindows() ? "mvn.cmd" : "mvn";
         List<String> commandParts = new ArrayList<>();
         commandParts.add(mvnCommand);
-        commandParts.addAll(Arrays.asList(goals));
+        commandParts.addAll(Arrays.asList(goalsForExplicit));
 
-        logger.info("Executing Maven command: {} in directory: {}", String.join(" ", commandParts), projectDir.getAbsolutePath());
+        logger.info("Executing Maven command: {} in directory: {} (explicit version path)", String.join(" ", commandParts), projectDir.getAbsolutePath());
         if (detectedJavaVersion != null) {
-            logger.info("Attempting to use Java version: {}", detectedJavaVersion);
+            logger.info("Attempting to use explicitly provided Java version: {}", detectedJavaVersion);
+        } else {
+            logger.info("No explicit Java version provided (null). Maven will use its default JDK.");
         }
 
         ProcessBuilder processBuilder = new ProcessBuilder(commandParts);
@@ -73,27 +74,27 @@ public class MavenBuildServiceImpl implements MavenBuildService {
         if (detectedJavaVersion != null) {
             String jdkPath = findJdkPathForVersion(detectedJavaVersion);
             if (jdkPath != null && new File(jdkPath).exists()) {
-                logger.info("Setting JAVA_HOME to: {} for Maven execution.", jdkPath);
+                logger.info("Setting JAVA_HOME to: {} for Maven execution (explicit version path).", jdkPath);
                 environment.put("JAVA_HOME", jdkPath);
             } else {
-                logger.warn("JDK path for version {} not found or configured. Maven will use its default JDK.", detectedJavaVersion);
+                logger.warn("JDK path for explicitly provided version {} not found or configured. Maven will use its default JDK (explicit version path).", detectedJavaVersion);
             }
-        }
+        } // If detectedJavaVersion is null, we intentionally don't modify JAVA_HOME here, letting Maven use its default
 
         processBuilder.redirectErrorStream(true);
         Process process = processBuilder.start();
 
-        StringBuilder mavenOutput = new StringBuilder(); // Capture output
+        StringBuilder mavenOutput = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 mavenOutput.append(line).append(System.lineSeparator());
-                logger.info("[MAVEN] {}", line); // Continue logging for real-time feedback
+                logger.info("[MAVEN] {}", line);
             }
         }
 
         int exitCode = process.waitFor();
-        logger.info("Maven command finished with exit code: {}", exitCode);
+        logger.info("Maven command (explicit version path) finished with exit code: {}", exitCode);
 
         if (originalJavaHome != null) {
             environment.put("JAVA_HOME", originalJavaHome);
@@ -102,10 +103,9 @@ public class MavenBuildServiceImpl implements MavenBuildService {
         }
 
         if (exitCode != 0) {
-            logger.error("Maven command failed with exit code {}. Goals: {}\nOutput:\n{}", exitCode, String.join(" ", goals), mavenOutput.toString());
+            logger.error("Maven command (explicit version path) failed. Exit code {}. Goals: {}\nOutput:\n{}", exitCode, String.join(" ", goalsForExplicit), mavenOutput.toString());
         } else {
-            // Optionally log output even on success for debugging, can be very verbose
-            // logger.debug("Maven command successful. Goals: {}\nOutput:\n{}", String.join(" ", goals), mavenOutput.toString());
+            // logger.debug("Maven command (explicit version path) successful. Goals: {}\nOutput:\n{}", String.join(" ", goalsForExplicit), mavenOutput.toString());
         }
         return new MavenExecutionResult(exitCode, mavenOutput.toString());
     }
