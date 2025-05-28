@@ -1,9 +1,11 @@
 package com.codedocgen.service.impl;
 
+import com.codedocgen.dto.MavenExecutionResult;
 import com.codedocgen.model.ClassMetadata;
 import com.codedocgen.model.MethodMetadata;
 import com.codedocgen.model.FieldMetadata;
 import com.codedocgen.service.JavaParserService;
+import com.codedocgen.service.MavenBuildService;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.*;
@@ -13,6 +15,7 @@ import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.Modifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
@@ -46,115 +49,76 @@ public class JavaParserServiceImpl implements JavaParserService {
 
     private static final DaoAnalyzer daoAnalyzer = new DaoAnalyzer();
 
+    private final MavenBuildService mavenBuildService;
+
     private File currentProjectDir;
     private JavaSymbolSolver symbolResolver;
+
+    @Autowired
+    public JavaParserServiceImpl(MavenBuildService mavenBuildService) {
+        this.mavenBuildService = mavenBuildService;
+    }
 
     private void ensureSymbolSolverInitialized(File projectDir) {
         if (this.symbolResolver == null || !projectDir.equals(this.currentProjectDir)) {
             logger.info("Initializing JavaParser Symbol Solver for project: {}", projectDir.getAbsolutePath());
             this.currentProjectDir = projectDir;
 
-            // Attempt to compile the project first to ensure generated sources are available
             File pomFileForCompile = new File(projectDir, "pom.xml");
             if (pomFileForCompile.exists() && pomFileForCompile.isFile()) {
-                logger.info("Found pom.xml, attempting to compile the project to generate sources before symbol solving.");
+                logger.info("Found pom.xml, attempting to compile the project via MavenBuildService.");
                 try {
-                    String osName = System.getProperty("os.name").toLowerCase();
-                    String mvnCommand = osName.contains("win") ? "mvn.cmd" : "mvn";
-                    
-                    ProcessBuilder compilePb = new ProcessBuilder(
-                        mvnCommand,
-                        "compile",
-                        "-DskipTests",
-                        "-q" 
-                    );
-                    compilePb.directory(projectDir);
-                    compilePb.redirectErrorStream(true);
+                    MavenExecutionResult compileResult = mavenBuildService.runMavenCommand(projectDir, "compile", "-DskipTests", "-q");
+                    logger.info("Maven 'compile' command finished with exit code: {}", compileResult.getExitCode());
 
-                    logger.info("Executing Maven command: {}", String.join(" ", compilePb.command()));
-                    Process compileProcess = compilePb.start();
-                    
-                    StringBuilder compileMavenOutput = new StringBuilder();
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(compileProcess.getInputStream(), StandardCharsets.UTF_8))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            compileMavenOutput.append(line).append(System.lineSeparator());
-                        }
-                    }
-
-                    int compileExitCode = compileProcess.waitFor();
-                    logger.info("Maven 'compile' command finished with exit code: {}. Output: {}", compileExitCode, compileMavenOutput.toString());
-
-                    if (compileExitCode != 0) {
-                        logger.warn("Maven compile command failed. Generated sources might be missing or incomplete.");
-                        String output = compileMavenOutput.toString();
+                    if (!compileResult.isSuccess()) {
+                        logger.warn("Maven compile command failed with exit code {}. Generated sources might be missing or incomplete.", compileResult.getExitCode());
+                        String output = compileResult.getOutput();
                         
                         // Check for specific dependency errors and try to fix them
                         if (output.contains("javax.activation.MimeTypeParseException") || 
                             output.contains("Unable to find artifact") ||
                             output.contains("Dependency resolution failed")) {
-                            logger.info("Attempting to fix missing dependencies with Maven dependency resolution...");
                             
-                            // Try to resolve dependencies first
+                            logger.info("Specific error pattern found in Maven output. Attempting to fix missing dependencies with Maven dependency resolution...");
                             try {
-                                ProcessBuilder resolveDepsPb = new ProcessBuilder(
-                                    mvnCommand,
-                                    "dependency:resolve",
-                                    "-U",
-                                    "-DskipTests",
-                                    "-q"
-                                );
-                                resolveDepsPb.directory(projectDir);
-                                resolveDepsPb.redirectErrorStream(true);
-                                Process resolveProcess = resolveDepsPb.start();
-                                
-                                try (BufferedReader depReader = new BufferedReader(
-                                        new InputStreamReader(resolveProcess.getInputStream(), StandardCharsets.UTF_8))) {
-                                    String line;
-                                    while ((line = depReader.readLine()) != null) {
-                                        // Just consume output
+                                MavenExecutionResult resolveResult = mavenBuildService.runMavenCommand(projectDir, "dependency:resolve", "-U", "-DskipTests", "-q");
+                                logger.info("Maven 'dependency:resolve' command finished with exit code: {}", resolveResult.getExitCode());
+
+                                if (resolveResult.isSuccess()) {
+                                    logger.info("Dependency resolution successful, retrying compilation with -offline...");
+                                    MavenExecutionResult retryCompileResult = mavenBuildService.runMavenCommand(projectDir,
+                                            "compile",
+                                            "-DskipTests",
+                                            "-q",
+                                            "-Djavax.activation.debug=true",
+                                            "-offline"
+                                    );
+                                    logger.info("Retry Maven 'compile -offline' command finished with exit code: {}", retryCompileResult.getExitCode());
+                                    if (!retryCompileResult.isSuccess()) {
+                                        logger.warn("Retry compile command also failed with exit code {}.", retryCompileResult.getExitCode());
                                     }
+                                } else {
+                                    logger.warn("Dependency resolution failed with exit code {}. Skipping retry compile.", resolveResult.getExitCode());
                                 }
-                                
-                                resolveProcess.waitFor();
-                                logger.info("Dependency resolution completed, retrying compilation...");
-                                
-                                // Retry compilation with -offline to use local repo
-                                ProcessBuilder retryCompilePb = new ProcessBuilder(
-                                    mvnCommand,
-                                    "compile",
-                                    "-DskipTests",
-                                    "-q",
-                                    "-Djavax.activation.debug=true",
-                                    "-offline"
-                                );
-                                retryCompilePb.directory(projectDir);
-                                retryCompilePb.redirectErrorStream(true);
-                                Process retryProcess = retryCompilePb.start();
-                                
-                                try (BufferedReader retryReader = new BufferedReader(
-                                        new InputStreamReader(retryProcess.getInputStream(), StandardCharsets.UTF_8))) {
-                                    String line;
-                                    while ((line = retryReader.readLine()) != null) {
-                                        // Just consume output
-                                    }
-                                }
-                                
-                                retryProcess.waitFor();
-                                logger.info("Retry compilation attempt completed");
                             } catch (Exception e) {
-                                logger.warn("Error during dependency resolution retry: {}", e.getMessage());
+                                logger.warn("Error during Maven dependency resolution/retry: {}", e.getMessage());
+                                if (e instanceof InterruptedException) {
+                                    Thread.currentThread().interrupt();
+                                }
                             }
+                        } else {
+                            logger.info("No specific known error pattern found in Maven compile output for automatic retry. Output was:\n{}", output);
                         }
                     }
                 } catch (IOException | InterruptedException e) {
-                    logger.error("Error while running Maven compile for Symbol Solver pre-step: {}", e.getMessage(), e);
+                    logger.error("Error while running Maven commands for Symbol Solver pre-step: {}", e.getMessage(), e);
                     if (e instanceof InterruptedException) {
                         Thread.currentThread().interrupt();
                     }
                 }
             } else {
-                logger.info("No pom.xml found in {}, skipping pre-compile step.", projectDir.getAbsolutePath());
+                logger.info("No pom.xml found in {}, skipping Maven pre-compile step.", projectDir.getAbsolutePath());
             }
 
             CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();

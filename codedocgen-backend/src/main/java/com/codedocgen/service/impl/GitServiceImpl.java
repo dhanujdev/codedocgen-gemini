@@ -1,6 +1,7 @@
 package com.codedocgen.service.impl;
 
 import com.codedocgen.service.GitService;
+import com.codedocgen.util.JavaVersionUtil;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.slf4j.Logger;
@@ -36,6 +37,20 @@ public class GitServiceImpl implements GitService {
                 .setDepth(1) // Shallow clone for speed, full history might not be needed for doc gen
                 .call()) {
             logger.info("Repository cloned successfully to: {}", result.getRepository().getDirectory().getParent());
+
+            // Detect and log Java version from pom.xml
+            File pomFile = new File(localDir, "pom.xml");
+            if (pomFile.exists()) {
+                String detectedJavaVersion = JavaVersionUtil.detectJavaVersionFromPom(pomFile);
+                if (detectedJavaVersion != null) {
+                    logger.info("Detected Java version {} for project in {}", detectedJavaVersion, localDir.getAbsolutePath());
+                } else {
+                    logger.warn("Could not detect Java version from pom.xml in {}", localDir.getAbsolutePath());
+                }
+            } else {
+                logger.info("No pom.xml found in the root of the cloned repository at {}. Skipping Java version detection.", localDir.getAbsolutePath());
+            }
+
             return localDir;
         } catch (GitAPIException e) {
             logger.error("Error cloning repository {}: {}", repoUrl, e.getMessage(), e);
