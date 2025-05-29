@@ -6,8 +6,8 @@ This is the backend service for the Code Documentation Generator. It is a Spring
 
 -   **Git Repository Cloning:** Clones public Git repositories for analysis.
 -   **Project Detection:**
-    -   Detects project type (e.g., Maven).
-    -   Identifies if a project uses Spring Boot and extracts its version.
+    -   Detects project type (e.g., Maven, Gradle).
+    -   Identifies if a project uses Spring Boot and extracts its version (from `pom.xml`, `build.gradle`, `build.gradle.kts`).
 -   **Advanced Java Parsing (JavaParser & JavaSymbolSolver):**
     -   Parses Java source files (`.java`).
     -   Utilizes a sophisticated **Symbol Solver** for accurate type resolution and method call linking.
@@ -21,7 +21,7 @@ This is the backend service for the Code Documentation Generator. It is a Spring
 -   **DAO & Database Analysis (Enhanced):**
     -   Identifies Spring Data repository interfaces and other DAO patterns.
     *   Extracts entity names from repository generics and class definitions.
-    *   Generates synthetic queries for Spring Data methods and extracts SQL from annotations/method bodies using `DaoAnalyzer`.
+    *   Generates synthetic queries for Spring Data methods and extracts SQL from annotations/method bodies using `DaoAnalyzer` (includes basic support for SQL in string variables).
     *   Performs validation of table names against known entities.
     *   **Returns a `DbAnalysisResult` object containing:**
         *   `operationsByClass`: A map of (DAO/Repository FQN -> List of `DaoOperationDetail`).
@@ -31,7 +31,8 @@ This is the backend service for the Code Documentation Generator. It is a Spring
 -   **Diagram Generation (PlantUML & Graphviz):**
     -   Renders Class, Component, Usecase, Sequence, ERD, and Database Schema diagrams as SVGs.
     -   Requires Graphviz (`dot` executable).
--   **API Endpoint Extraction:** Identifies REST API endpoints.
+-   **API Endpoint Extraction:** Identifies REST (`@RequestMapping` with method attribute) and SOAP (`@WebMethod`) API endpoints.
+-   **Documentation Generation:** Creates project summaries including method call details and basic tech stack information.
 -   **Contract Generation:** Generates OpenAPI v3 specification.
 -   **Gherkin Feature File Discovery:** Locates and provides content of `.feature` files.
 -   **Static File Serving:** Serves generated diagrams and other static output.
@@ -55,20 +56,21 @@ Ensure Graphviz `dot` executable is in your PATH.
 -   **Enhanced Call Flow Analysis:** More accurate sequence diagrams and raw call steps.
 -   **Improved DAO & DB Analysis (Major Update):**
     *   Implementation of `DbAnalysisResult` to provide a structured view of database interactions, including mappings between entities and the classes that operate on them (`classesByEntity`), alongside detailed operations per class (`operationsByClass`).
-    *   Refined logic for identifying DAOs/Repositories and extracting/validating their operations.
+    *   Refined logic for identifying DAOs/Repositories and extracting/validating their operations, including basic support for SQL in string variables (`DaoAnalyzer.java`).
     *   Logic to remove redundant interface entries from the final DAO analysis if an implementing class with operations is also present.
 -   **Accurate Class Typing:** Better distinction between entities, models, and other class stereotypes.
 -   **Lombok Handling:** Improved resolution for Lombok-generated methods.
 -   **Diagram Generation:** All diagrams as SVG; cleaner sequence diagram labels.
--   **Spring Boot Detection:** Accurate version detection.
+-   **Spring Boot Detection:** Accurate version detection from `pom.xml` and Gradle build files (`build.gradle`, `build.gradle.kts`), with corrected regex for Java string literals.
+-   **Endpoint Extraction:** Added support for `@RequestMapping` method attribute and JAX-WS `@WebMethod` annotations (`EndpointExtractorServiceImpl.java`).
+-   **Documentation Generation:** Project summaries now include called methods/external calls, and basic tech stack details (`DocumentationServiceImpl.java`).
 -   **Robust Logging:** Extensive `TRACE` and `DEBUG` logging.
 -   **Build & Dependency Management:** Correct use of Maven for symbol solver initialization.
 -   **Bug Fixes:** Addressed numerous parsing and runtime issues.
 
 ## TODOs (Backend Specific)
-*   **`EndpointExtractorServiceImpl.java`**: Determine specific HTTP method from `@RequestMapping`; Add support for `@WebMethod` (JAX-WS).
-*   **`ProjectDetectorServiceImpl.java`**: Add Gradle build file parsing for Spring Boot version.
-*   **`DocumentationServiceImpl.java`**: Add called methods to summaries; Enhance project summary with tech stack.
-*   **`DaoAnalyzer.java`**: Handle SQL in variables or constructed dynamically.
+*   **`DaoAnalyzer.java`**: Further enhance to handle more complex cases of SQL in variables or constructed dynamically.
 *   Support for private Git repositories.
-*   Performance optimizations for very large codebases. 
+*   Performance optimizations for very large codebases.
+*   Deeper YAML parsing if used for project configuration.
+*   Further refinement of REST endpoint detail extraction for complex request/response bodies. 

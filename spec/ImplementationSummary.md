@@ -11,8 +11,8 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **Core Workflow:**
     1.  User provides a public Git repository URL via the frontend.
     2.  Frontend sends the URL to the backend's `/api/analysis/analyze` endpoint.
-    3.  Backend clones the repository, extracts project name, performs deep analysis (project type detection, Spring Boot versioning, **advanced Java parsing with symbol resolution**, class/method metadata extraction, **call flow tracing**, **comprehensive DAO/DB analysis including entity-to-class mappings**, endpoint extraction, generation of multiple diagram types), and returns a structured `ParsedDataResponse`.
-    4.  Frontend displays the received information in a user-friendly sidebar-navigated interface, correctly loading served diagrams and detailed analysis results, including an entity-centric database view.
+    3.  Backend clones the repository, extracts project name, performs deep analysis (project type detection, Spring Boot versioning from pom.xml/build.gradle, **advanced Java parsing with symbol resolution**, class/method metadata extraction, **call flow tracing**, **comprehensive DAO/DB analysis including entity-to-class mappings and basic SQL variable tracking**, endpoint extraction, generation of multiple diagram types), and returns a structured `ParsedDataResponse`.
+    4.  Frontend displays the received information in a user-friendly sidebar-navigated interface, correctly loading served diagrams and detailed analysis results, including an entity-centric database view and **call flows with human-readable names parsed from full Java signatures**.
 
 ## 2. Backend Details (`codedocgen-backend`)
 
@@ -58,11 +58,11 @@ This document summarizes the current state of the CodeDocGen project, covering b
 ### 2.4. Services - `com.codedocgen.service` & `com.codedocgen.service.impl`
 
 *   **`GitService` / `GitServiceImpl`:** Clones and cleans Git repos.
-*   **`ProjectDetectorService` / `ProjectDetectorServiceImpl`:** Detects build tool, Spring Boot presence, and version.
+*   **`ProjectDetectorService` / `ProjectDetectorServiceImpl`:** Detects build tool, Spring Boot presence, and version (supports `pom.xml`, `build.gradle`, `build.gradle.kts`).
 *   **`JavaParserService` / `JavaParserServiceImpl`:** Core parsing engine using JavaParser and **JavaSymbolSolver**.
-*   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:** Extracts REST endpoint info.
+*   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:** Extracts REST and SOAP (e.g. `@WebMethod`) endpoint info.
 *   **`DiagramService` / `DiagramServiceImpl`:** Generates Class, Component, Usecase, Sequence, ERD, and DB Schema diagrams as SVGs.
-*   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries, finds feature/WSDL/XSD files.
+*   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries (including called methods, external calls, and tech stack details from available data), finds feature/WSDL/XSD files.
 *   **`DaoAnalysisService` / `DaoAnalysisServiceImpl`:**
     *   Analyzes repository interfaces and classes.
     *   Uses `DaoAnalyzer` helper to detect SQL queries and table names.
@@ -74,7 +74,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
 ### 2.5. Parsers - `com.codedocgen.parser`
 
 *   **`CallFlowAnalyzer.java`:** Builds detailed call flow sequences.
-*   **`DaoAnalyzer.java`:** Utility class for `DaoAnalysisServiceImpl` to find SQL queries and table names.
+*   **`DaoAnalyzer.java`:** Utility class for `DaoAnalysisServiceImpl` to find SQL queries and table names (includes basic support for SQL in string variables).
 *   **`SoapWsdlParser.java`**, **`YamlParser.java`**: Existing parsers.
 
 ### 2.6. Controller - `com.codedocgen.controller`
@@ -95,7 +95,10 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **`OverviewPage.js`:** Project summary.
 *   **`ClassesPage.js`:** Detailed view of parsed classes.
 *   **`ApiSpecsPage.js`:** Displays OpenAPI specs and detailed WSDL/XSD structures.
-*   **`CallFlowPage.js`:** Displays sequence diagrams and raw call steps.
+*   **`CallFlowPage.js`:**
+    *   Displays sequence diagrams and raw call steps.
+    *   Integrates `FlowExplorer.tsx` for interactive exploration of flow steps.
+    *   **Features a `generateFlowDisplayName` helper function to parse full Java method signatures (including parameters with types and names) and generate human-readable titles for diagrams and flow details.**
 *   **`DiagramsPage.js`:** Displays general diagrams.
 *   **`DatabasePage.js`:**
     *   Displays the Database Schema diagram.
@@ -109,16 +112,20 @@ This document summarizes the current state of the CodeDocGen project, covering b
 ## 4. Functionality Achieved (Key Highlights)
 
 *   **Deep Java Analysis:** Robust parsing with symbol resolution.
-*   **Comprehensive Call Flow Analysis:** Detailed sequence diagrams and raw call steps.
+*   **Comprehensive Call Flow Analysis:**
+    *   Detailed sequence diagrams and raw call steps.
+    *   **User-friendly display names for call flows in the UI, parsed from complex Java signatures.**
 *   **Database & DAO Insights:**
-    *   Detection of entities, DAO/repository operations.
+    *   Detection of entities, DAO/repository operations (with basic SQL variable tracking).
     *   Generation of a database schema diagram.
     *   **Entity-centric view showing which classes operate on each entity.**
     *   Detailed breakdown of operations per DAO/Repository class.
 *   **Multiple Diagram Types:** Class, Sequence, Component, Usecase, ERD, and Database Schema diagrams.
-*   **Accurate Spring Boot Detection.**
+*   **Accurate Spring Boot Detection (Maven & Gradle).**
 *   **User-Friendly Frontend:** Clear presentation, interactive diagram viewers.
 *   **Detailed API Specification Display.**
+*   **Support for JAX-WS `@WebMethod` and improved `@RequestMapping` handling.**
+*   **Enhanced documentation summaries with method calls and tech stack details.**
 
 ## 5. Build Status
 
@@ -129,21 +136,13 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **Advanced Parsing & Analysis (Backend):**
     *   Further refinement of REST endpoint detail extraction (complex request/response bodies).
     *   Deeper YAML parsing if used for project configuration.
-    *   **`EndpointExtractorServiceImpl.java`**:
-        *   Determine specific HTTP method from `@RequestMapping` if specified.
-        *   Add support for other SOAP annotations like `@WebMethod` (JAX-WS).
-    *   **`ProjectDetectorServiceImpl.java`**: Add Gradle detection for Spring Boot version if necessary.
-    *   **`DocumentationServiceImpl.java`**:
-        *   (Method summaries) Add called methods / external calls if data is available.
-        *   (Project summary) Enhance with common libraries, tech stack details.
-    *   **`DaoAnalyzer.java`**: Handle cases where SQL is in a variable or constructed dynamically.
+    *   **`DaoAnalyzer.java`**: Handle more complex cases of SQL in variables or constructed dynamically (currently basic support).
 *   **Diagrams & Visualization:**
-    *   More interactive call flow visualization.
+    *   More interactive call flow visualization beyond current expand/collapse.
 *   **Frontend Enhancements:**
     *   UI/UX improvements for very large datasets (filtering, searching, pagination).
     *   Dark mode.
-    *   **`FlowExplorer.tsx`**: Add more details or a way to expand/explore the flow.
-    *   **`ApiSpecsPage.js`** (WSDL/XSD rendering): If `typeAttr` refers to a global `complexType`, expand it.
+    *   **`ApiSpecsPage.js`** (WSDL/XSD rendering): Future enhancement - if `typeAttr` refers to a global `complexType`, expand it (acknowledged, complex).
 *   **Backend Enhancements:**
     *   Configuration for private Git repositories.
     *   Performance optimizations for extremely large codebases.
@@ -158,17 +157,24 @@ This document summarizes the current state of the CodeDocGen project, covering b
 - Sequence diagrams use quoted FQNs.
 - **Symbol Solver & Pre-compilation (Backend)**: `mvn compile` pre-step for enhanced symbol resolution.
 - **WSDL & XSD Deep Parsing (Frontend & Backend)**.
-- **Call Flow Page & Sidebar Navigation (Frontend)**.
+- **Call Flow Page & Sidebar Navigation (Frontend)**:
+    - Integration of `FlowExplorer.tsx` for better step navigation.
+    - **Implementation of `generateFlowDisplayName` in `CallFlowPage.js` for significantly improved, human-readable names for call flows and sequence diagrams, correctly parsing method signatures including parameters.**
 - **Refined API Specs UI**.
 - **Enhanced Component Diagram for SOAP/Legacy Applications**.
 - **Comprehensive Usecase Diagram for SOAP/Legacy Applications**.
 - **DAO/JDBC Analysis & Database Schema Visualization**:
     - Automatic identification of DAO/Repository classes.
-    *   Extraction of SQL queries and inference from method names.
+    *   Extraction of SQL queries (with basic variable support) and inference from method names.
     *   Categorization of operations (SELECT, INSERT, UPDATE, DELETE) and table name extraction.
     *   Generation of Database Schema diagrams linking DAOs to tables.
     *   **New `DbAnalysisResult` DTO in backend providing `operationsByClass` and `classesByEntity` maps.**
     *   **Frontend `DatabasePage.js` refactored to display an entity-centric view ("Entities and Interacting Classes") and a detailed DAO operation view (now including method names).**
     *   **Backend logic to remove redundant service interfaces from DAO listings if their implementation is present.**
+- **Backend TODOs Addressed:**
+    - `EndpointExtractorServiceImpl.java`: Support for `@RequestMapping` method attribute and `@WebMethod` (JAX-WS).
+    - `ProjectDetectorServiceImpl.java`: Added Gradle support for Spring Boot version detection (with regex fixes).
+    - `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced.
+    - `DaoAnalyzer.java`: Basic support for SQL in variables.
 
 (Removed the old "New Feature: DAO/JDBC Analysis" section as its content is now integrated above and in the main sections) 
