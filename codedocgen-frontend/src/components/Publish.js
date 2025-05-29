@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
@@ -31,19 +31,10 @@ const Publish = ({ repoName }) => {
     flows: 'unknown'
   });
 
-  // Check available sections when repo changes
-  useEffect(() => {
-    if (repoName) {
-      checkAvailableSections();
-    }
-  }, [repoName]);
-
-  // Check which sections are available for this repo
-  const checkAvailableSections = async () => {
+  // Define callback functions before useEffect hooks that depend on them
+  const checkAvailableSections = useCallback(async () => {
     if (!repoName) return;
-    
     setPreviewLoading(true);
-    
     try {
       // Check API docs
       try {
@@ -52,75 +43,54 @@ const Publish = ({ repoName }) => {
       } catch (e) {
         setSectionStatus(prev => ({ ...prev, api_docs: 'error' }));
       }
-      
       // Check features
       try {
-        const features = await axios.get(`${API_BASE_URL}/api/repo/features/${repoName}`);
-        setSectionStatus(prev => ({ ...prev, features: features.data.features && features.data.features.length > 0 ? 'available' : 'empty' }));
+        const featuresData = await axios.get(`${API_BASE_URL}/api/repo/features/${repoName}`);
+        setSectionStatus(prev => ({ ...prev, features: featuresData.data.features && featuresData.data.features.length > 0 ? 'available' : 'empty' }));
       } catch (e) {
         setSectionStatus(prev => ({ ...prev, features: 'error' }));
       }
-      
       // Check flows
       try {
-        const flows = await axios.get(`${API_BASE_URL}/api/repo/flows/${repoName}`);
-        setSectionStatus(prev => ({ ...prev, flows: flows.data.flows && Object.keys(flows.data.flows).length > 0 ? 'available' : 'empty' }));
+        const flowsData = await axios.get(`${API_BASE_URL}/api/repo/flows/${repoName}`);
+        setSectionStatus(prev => ({ ...prev, flows: flowsData.data.flows && Object.keys(flowsData.data.flows).length > 0 ? 'available' : 'empty' }));
       } catch (e) {
         setSectionStatus(prev => ({ ...prev, flows: 'error' }));
       }
-      
-      // Diagrams always available
       setSectionStatus(prev => ({ ...prev, diagrams: 'available' }));
-      
     } catch (err) {
       console.error("Error checking sections:", err);
     } finally {
       setPreviewLoading(false);
     }
-  };
+  }, [repoName]);
   
-  // Generate preview content
-  const generatePreview = async () => {
+  const generatePreview = useCallback(async () => {
     if (!repoName) return;
-    
     setPreviewLoading(true);
-    
     try {
-      // For now we'll just create a simple markdown preview
-      // In a real implementation, this would call a backend API to generate HTML
       let preview = `# ${pageTitle || 'API Documentation'}\n\n`;
       preview += `Documentation for repository: **${repoName}**\n\n`;
-      
       const selectedSectionsList = Object.entries(selectedSections)
         .filter(([_, isSelected]) => isSelected)
         .map(([sectionKey, _]) => sectionKey);
-      
       if (selectedSectionsList.length === 0) {
         preview += "*No sections selected for publishing*";
       } else {
         preview += "## Selected Sections\n\n";
-        
         if (selectedSections.api_docs) {
-          preview += "### API Documentation\n";
-          preview += "REST API endpoints and their descriptions\n\n";
+          preview += "### API Documentation\nREST API endpoints and their descriptions\n\n";
         }
-        
         if (selectedSections.features) {
-          preview += "### Feature Files\n";
-          preview += "Behavioral specifications and scenarios\n\n";
+          preview += "### Feature Files\nBehavioral specifications and scenarios\n\n";
         }
-        
         if (selectedSections.diagrams) {
-          preview += "### System Diagrams\n";
-          preview += "Visual representations of system architecture\n\n";
+          preview += "### System Diagrams\nVisual representations of system architecture\n\n";
         }
-        
         if (selectedSections.flows) {
-          preview += "### Flow Summaries\n";
-          preview += "End-to-end flow descriptions\n\n";
+          preview += "### Flow Summaries\nEnd-to-end flow descriptions\n\n";
         }
       }
-      
       setPreviewContent(preview);
     } catch (err) {
       console.error("Error generating preview:", err);
@@ -128,14 +98,20 @@ const Publish = ({ repoName }) => {
     } finally {
       setPreviewLoading(false);
     }
-  };
+  }, [repoName, pageTitle, selectedSections]);
 
-  // Update preview when selections change
+  // useEffect hooks after callback definitions
+  useEffect(() => {
+    if (repoName) {
+      checkAvailableSections();
+    }
+  }, [repoName, checkAvailableSections]);
+
   useEffect(() => {
     if (repoName) {
       generatePreview();
     }
-  }, [repoName, pageTitle, selectedSections]);
+  }, [repoName, pageTitle, selectedSections, generatePreview]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

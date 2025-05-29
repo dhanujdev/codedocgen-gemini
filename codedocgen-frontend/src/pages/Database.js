@@ -47,15 +47,16 @@ const Database = ({ analysisResult }) => {
   const daoOperations = analysisResult.daoOperations;
   const dbDiagramPath = analysisResult.dbDiagramPath || (analysisResult.diagrams && analysisResult.diagrams['DATABASE_DIAGRAM']);
   
-  // Extract all unique tables from all operations
-  const allTables = new Set();
-  Object.values(daoOperations).forEach(operations => {
-    operations.forEach(op => {
-      if (op.tables) {
-        op.tables.forEach(table => allTables.add(table));
+  // Extract all unique entity names from allClassMetadata
+  const allEntities = new Set();
+  if (analysisResult.classes) {
+    analysisResult.classes.forEach(cls => {
+      const isEntity = cls.type === 'entity' || (cls.annotations && cls.annotations.some(ann => ann.includes('@Entity')));
+      if (isEntity && cls.name) {
+        allEntities.add(cls.name); // Add the class name, which should correspond to the entity/table name
       }
     });
-  });
+  }
 
   return (
     <Box sx={{ p: 3 }}>
@@ -81,10 +82,10 @@ const Database = ({ analysisResult }) => {
           Tables Detected
         </Typography>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, my: 2 }}>
-          {Array.from(allTables).map(table => (
+          {Array.from(allEntities).map(entityName => (
             <Chip 
-              key={table} 
-              label={table} 
+              key={entityName} 
+              label={entityName} // Display entity name
               variant="outlined" 
               color="primary"
             />

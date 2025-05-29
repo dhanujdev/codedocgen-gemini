@@ -1,111 +1,198 @@
-import React, { useEffect, useRef } from 'react';
-import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
-import mermaid from 'mermaid';
+import React, { useEffect, useRef, useState } from 'react';
+import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch';
+import mermaid, { MermaidConfig } from 'mermaid';
+import { Box, IconButton, Tooltip, Paper, Typography } from '@mui/material';
+import ZoomInIcon from '@mui/icons-material/ZoomIn';
+import ZoomOutIcon from '@mui/icons-material/ZoomOut';
+import DownloadIcon from '@mui/icons-material/Download';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import RefreshIcon from '@mui/icons-material/Refresh'; // For resetting zoom
 
 // Define a more specific type for a single diagram object
 export interface Diagram {
-  key?: string; // Optional, but good for lists if we ever revert
+  key?: string;
   title: string;
-  url?: string;        // For image-based diagrams
-  content?: string;    // For text-based diagrams (Mermaid/PlantUML)
+  url?: string;
+  content?: string;
   type: string;
-  originalTitle?: string; 
+  originalTitle?: string;
 }
 
 interface DiagramViewerProps {
-  diagram: Diagram | null; // Expect a single diagram object, or null
+  diagram: Diagram | null;
 }
 
-// Initialize Mermaid once
-mermaid.initialize({
-  startOnLoad: false, // We will render manually
-  theme: 'neutral', // or 'default', 'forest', 'dark', 'neutral' - choose one that fits
-  // securityLevel: 'loose', // Consider security implications if diagrams come from untrusted sources
-  // loglevel: 'debug', // For debugging mermaid issues
-});
+// Define the configuration for Mermaid
+const mermaidConfig: MermaidConfig = {
+  startOnLoad: false,
+  theme: 'neutral',
+  // securityLevel: 'sandbox', // Example: for stricter security
+  // Other valid MermaidConfig properties can be added here
+};
+mermaid.initialize(mermaidConfig);
+
+const ViewerControls = () => {
+  const { zoomIn, zoomOut, resetTransform } = useControls();
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mb: 1 }}>
+      <Tooltip title="Zoom In">
+        <IconButton onClick={() => zoomIn(0.2)} size="small"><ZoomInIcon /></IconButton>
+      </Tooltip>
+      <Tooltip title="Zoom Out">
+        <IconButton onClick={() => zoomOut(0.2)} size="small"><ZoomOutIcon /></IconButton>
+      </Tooltip>
+      <Tooltip title="Reset Zoom">
+        <IconButton onClick={() => resetTransform()} size="small"><RefreshIcon /></IconButton>
+      </Tooltip>
+    </Box>
+  );
+};
 
 const DiagramViewer: React.FC<DiagramViewerProps> = ({ diagram }) => {
-  const mermaidDivRef = useRef<HTMLDivElement>(null); // Ref for the div where Mermaid SVG will be injected
+  const mermaidDivRef = useRef<HTMLDivElement>(null);
+  const [svgContent, setSvgContent] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (diagram && diagram.content && mermaidDivRef.current) {
-      const currentMermaidDiv = mermaidDivRef.current; // Capture ref value
-      // Clear previous content before rendering new one
-      currentMermaidDiv.innerHTML = ''; 
-      try {
-        // Attempt to have Mermaid render directly into the container
-        // The ID for the graph definition within the SVG, must be unique if multiple graphs are on the page simultaneously.
-        // However, since we clear and re-render one diagram at a time, a static ID might be fine.
-        // To be safe, using a dynamic one related to the diagram or a timestamp.
-        const graphId = `mermaid-graph-${diagram.key || Date.now()}`;
-        mermaid.render(graphId, diagram.content, currentMermaidDiv);
-      } catch (error) {
-        console.error("Mermaid rendering error:", error);
-        if (currentMermaidDiv) {
-          currentMermaidDiv.innerHTML = '<p style="color: red;">Error rendering Mermaid diagram.</p>';
-        }
-      }
-    } else if (mermaidDivRef.current) {
-      // Clear previous diagram if no diagram/content
-      mermaidDivRef.current.innerHTML = '';
-    }
-  }, [diagram]); // Rerun when the diagram (and thus its content) changes
+    setSvgContent(null); // Clear previous SVG
+    setRenderError(null); // Clear previous error
 
-  // If no diagram is provided, or diagram is explicitly null
+    const renderMermaid = async () => {
+      if (diagram && diagram.content && mermaidDivRef.current) {
+        const currentMermaidDiv = mermaidDivRef.current;
+        currentMermaidDiv.innerHTML = ''; // Clear the container explicitly
+        try {
+          const graphId = `mermaid-graph-${diagram.key || Date.now()}`;
+          // Use mermaidAPI.render for more control and to get SVG directly
+          // It returns a promise, so we need to await it.
+          const { svg } = await mermaid.mermaidAPI.render(graphId, diagram.content);
+          setSvgContent(svg);
+          currentMermaidDiv.innerHTML = svg; // Inject the SVG for display
+
+          // Ensure the SVG itself is responsive
+          const svgElement = currentMermaidDiv.querySelector('svg');
+          if (svgElement) {
+            svgElement.style.maxWidth = '100%';
+            svgElement.style.height = 'auto';
+            svgElement.removeAttribute('height');
+            svgElement.setAttribute('width', '100%'); // Ensure it scales with the parent
+          }
+        } catch (error: any) {
+          console.error("Mermaid rendering error:", error);
+          const errorMessage = error.message || "Failed to render Mermaid diagram.";
+          setRenderError(errorMessage);
+          setSvgContent(null);
+          if (currentMermaidDiv) {
+            currentMermaidDiv.innerHTML = `<p style="color: red;">${errorMessage}</p>`;
+          }
+        }
+      } else if (mermaidDivRef.current) {
+        mermaidDivRef.current.innerHTML = ''; // Clear if no diagram or content
+      }
+    };
+
+    renderMermaid();
+
+  }, [diagram]);
+
+  const handleDownload = () => {
+    if (diagram && svgContent && !renderError && diagram.type !== 'IMAGE') {
+      const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${diagram.title.replace(/\s+/g, '_') || 'diagram'}.svg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else if (diagram && diagram.url && diagram.type === 'IMAGE') {
+      const a = document.createElement('a');
+      a.href = diagram.url;
+      a.download = diagram.title.replace(/\s+/g, '_') || 'diagram';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
+  const handleOpenInNewTab = () => {
+    if (diagram && svgContent && !renderError && diagram.type !== 'IMAGE') {
+      const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+      window.open(svgDataUrl, '_blank');
+    } else if (diagram && diagram.url && diagram.type === 'IMAGE') {
+      window.open(diagram.url, '_blank');
+    }
+  };
+
   if (!diagram) {
-    // This message is usually handled by the parent (Diagrams.js) before calling DiagramViewer
-    // But as a fallback, or if DiagramViewer could be used directly with a null diagram:
-    return <p style={{ textAlign: 'center', marginTop: '20px' }}>No diagram selected or available to display.</p>;
+    return <Typography sx={{ textAlign: 'center', mt: 4 }}>No diagram selected or available.</Typography>;
   }
 
-  // The parent component (Diagrams.js) already has a title for the section ("System Diagrams")
-  // So the h2 "Diagrams" here might be redundant or could be more specific.
-  // For now, let's display the specific title of the selected diagram.
+  const isMermaid = diagram.content && diagram.type !== 'IMAGE';
+  const isImage = diagram.url && diagram.type === 'IMAGE';
+
   return (
-    <div style={{ width: '100%' }}> {/* Ensure the viewer itself takes full width */}
-      {/* The h2 "Diagrams" might be redundant if Diagrams.js already has a main title for the section. 
-          Consider removing or making it specific to the selected diagram. 
-          For now, commenting out the generic "Diagrams" h2 as the parent handles section title.
-      <h2 className="text-xl font-semibold mb-2">Diagrams</h2> 
-      */}
-      
-      {/* Removed the grid layout as we are displaying a single diagram */}
-      <div className="border p-2 rounded" style={{ width: '100%' }}>
-        <h3 className="text-lg font-medium mb-1" style={{ textAlign: 'center' }}>{diagram.title || 'Untitled Diagram'}</h3>
-        {diagram.url ? (
-          <TransformWrapper
-            initialScale={1}
-            // minScale={0.5} // Optional: set min scale
-            // maxScale={3}   // Optional: set max scale
-            // limitToBounds={true} // Optional: prevent panning outside content
-            // wheel={{ step: 0.2 }} // Optional: control zoom sensitivity
-            // doubleClick={{ mode: 'reset' }} // Optional: reset on double click
-          >
-            <TransformComponent
-              // wrapperStyle={{ width: "100%", height: "auto" }} // Ensure wrapper takes space
-              // contentStyle={{ width: "100%", height: "auto" }} // Ensure content uses that space
-            >
-              <img 
-                src={diagram.url} 
-                alt={diagram.title || 'Diagram'} 
-                className="w-full h-auto" // Removed 'border' from here, outer div has it
-                style={{ maxWidth: '100%', display: 'block', margin: '0 auto' }} 
-              />
-            </TransformComponent>
-          </TransformWrapper>
-        ) : diagram.content ? (
-          // For Mermaid content, zoom/pan can be applied to the div containing the SVG if needed
-          // For now, letting the SVG scale with its container.
-          // If react-zoom-pan-pinch were to be used here, it would wrap this div.
-          <div ref={mermaidDivRef} className="mermaid-container w-full" style={{ textAlign: 'center' }}>
-            {/* Mermaid SVG will be generated and inserted here by mermaid.render directly */}
-          </div>
-        ) : (
-          <p>Diagram content not available (no URL or text content).</p>
+    <Paper elevation={1} sx={{ p: 2, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <Typography variant="h6" sx={{ fontWeight: 600, mb: 1, textAlign: 'center' }}>
+        {diagram.title || 'Untitled Diagram'}
+      </Typography>
+
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1, mb: 1 }}>
+        {( (isMermaid && svgContent && !renderError) || isImage) && (
+          <Tooltip title="Download Diagram">
+            <IconButton onClick={handleDownload} size="small"><DownloadIcon /></IconButton>
+          </Tooltip>
         )}
-      </div>
-    </div>
+        {( (isMermaid && svgContent && !renderError) || isImage) && (
+          <Tooltip title="Open in New Tab">
+            <IconButton onClick={handleOpenInNewTab} size="small"><OpenInNewIcon /></IconButton>
+          </Tooltip>
+        )}
+      </Box>
+
+      <TransformWrapper
+        initialScale={1}
+        minScale={0.2}
+        maxScale={5}
+        limitToBounds={false}
+        wheel={{ step: 0.2 }}
+        doubleClick={{ mode: 'reset' }}
+        key={diagram.key || diagram.title} // Add key to force re-render of zoom-pan-pinch on diagram change
+      >
+        <ViewerControls /> 
+        <TransformComponent
+          wrapperStyle={{ width: '100%', minHeight: '300px', border: '1px solid #eee', borderRadius: '4px' }}
+          contentStyle={{ width: '100%', height: '100%' }}
+        >
+          {isImage && diagram.url && (
+            <img 
+              src={diagram.url} 
+              alt={diagram.title || 'Diagram'} 
+              style={{ width: '100%', height: 'auto', display: 'block'}} 
+            />
+          )}
+          {isMermaid && (
+            <div 
+              ref={mermaidDivRef} 
+              className="mermaid-diagram-container"
+              style={{ width: '100%', minHeight: '300px'}} // Ensure div takes space
+            >
+              {renderError && <Typography sx={{textAlign: 'center', p:2, color: 'red'}}>{renderError}</Typography>}
+              {!svgContent && !renderError && <Typography sx={{textAlign: 'center', p:2}}>Loading diagram...</Typography>}
+              {/* SVG content is injected by useEffect into this div */}
+            </div>
+          )}
+        </TransformComponent>
+      </TransformWrapper>
+
+      {!isImage && !isMermaid && !renderError && (
+        <Typography sx={{textAlign: 'center', mt:2 }}>Diagram content not available (no URL or text content).</Typography>
+      )}
+    </Paper>
   );
 };
 
 export default DiagramViewer;
+

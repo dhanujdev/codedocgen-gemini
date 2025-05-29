@@ -7,8 +7,11 @@ server:
 # Logging configuration
 logging:
   level:
-    com.codedocgen: INFO
+    com.codedocgen.service.impl.JavaParserServiceImpl: DEBUG
+    # com.codedocgen.service.impl.JavaParserServiceImpl$ClassMetadataVisitor: TRACE # Old name commented out
+    com.codedocgen.parser.ClassMetadataVisitorLogger: TRACE # New, simpler logger name
     org.springframework.web: INFO
+    org.hibernate.type.descriptor.sql: TRACE # Added for Hibernate SQL logging, if needed later
 
 # Directory for cloned repositories
 app:

@@ -1,6 +1,5 @@
 import React from 'react';
-import { Box, Typography, Paper, Button, Card, CardContent, CircularProgress } from '@mui/material';
-import DownloadIcon from '@mui/icons-material/Download';
+import { Box, Typography, Paper, Card, CardContent } from '@mui/material';
 
 const Features = ({ features, repoName }) => {
   if (!repoName) {

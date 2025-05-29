@@ -24,6 +24,10 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.HashSet;
 
+// Import for System specific checks
+import java.nio.file.Paths;
+import java.nio.file.Files;
+
 @Service
 public class DiagramServiceImpl implements DiagramService {
 
@@ -40,43 +44,30 @@ public class DiagramServiceImpl implements DiagramService {
 
         // Class Diagram
         String classDiagramPath = null;
-        String classDiagramPlantUmlSource = null; // To hold PlantUML source for logging on error
         try {
-            // We need a way to get the PlantUML source from generateClassDiagram if it fails internally
-            // For now, we'll assume it returns null on failure or we re-generate it for logging if needed.
-            // A better approach would be for generateClassDiagram to return an object with path & source, or throw specific exception.
             classDiagramPath = generateClassDiagram(classMetadataList, baseOutputDir);
             if (classDiagramPath != null) {
                 diagramPaths.put(DiagramType.CLASS_DIAGRAM, classDiagramPath);
                 logger.info("Class Diagram generation successful. Path: {}", classDiagramPath);
             } else {
-                logger.warn("Class Diagram generation returned null.");
-                // Attempt to get/log PlantUML source for debugging if possible (conceptual)
-                // classDiagramPlantUmlSource = getPlantUmlSourceForClassDiagram(classMetadataList); // Placeholder
-                // logger.debug("PlantUML source for failed Class Diagram (if available):\n{}", classDiagramPlantUmlSource);
+                logger.warn("Class Diagram generation returned null. This might be due to an issue with PlantUML setup (e.g., Graphviz not found or PlantUML error). Check previous logs from generateClassDiagram.");
             }
-        } catch (Exception e) {
-            logger.error("Error generating class diagram: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
-            // Conceptual: Log PlantUML if possible
-            // logger.debug("PlantUML source for failed Class Diagram (if available) during exception:\n{}", classDiagramPlantUmlSource);
+        } catch (Exception e) { // Catch any other unexpected exceptions
+            logger.error("Unexpected error during class diagram generation orchestration: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
         }
 
         // ER Diagram
         String erDiagramPath = null;
-        String erDiagramPlantUmlSource = null; // To hold PlantUML source
         try {
             erDiagramPath = generateEntityRelationshipDiagram(classMetadataList, baseOutputDir);
             if (erDiagramPath != null) {
                 diagramPaths.put(DiagramType.ENTITY_RELATIONSHIP_DIAGRAM, erDiagramPath);
                 logger.info("ER Diagram generation successful. Path: {}", erDiagramPath);
             } else {
-                logger.warn("ER Diagram generation returned null.");
-                // erDiagramPlantUmlSource = getPlantUmlSourceForErDiagram(classMetadataList); // Placeholder
-                // logger.debug("PlantUML source for failed ER Diagram (if available):\n{}", erDiagramPlantUmlSource);
+                logger.warn("ER Diagram generation returned null. This might be due to an issue with PlantUML setup. Check previous logs from generateEntityRelationshipDiagram.");
             }
-        } catch (Exception e) {
-            logger.error("Error generating ER diagram: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
-            // logger.debug("PlantUML source for failed ER Diagram (if available) during exception:\n{}", erDiagramPlantUmlSource);
+        } catch (Exception e) { // Catch any other unexpected exceptions
+            logger.error("Unexpected error during ER diagram generation orchestration: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
         }
 
         // Component Diagram
@@ -87,12 +78,10 @@ public class DiagramServiceImpl implements DiagramService {
                 diagramPaths.put(DiagramType.COMPONENT_DIAGRAM, componentDiagramPath);
                 logger.info("Component Diagram generation successful. Path: {}", componentDiagramPath);
             } else {
-                logger.warn("Component Diagram generation returned null.");
-                // The generateComponentDiagram method already logs its PlantUML source on IOException.
+                logger.warn("Component Diagram generation returned null. This might be due to an issue with PlantUML setup. Check previous logs from generateComponentDiagram.");
             }
-        } catch (Exception e) {
-            logger.error("Error generating component diagram: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
-            // The generateComponentDiagram method already logs its PlantUML source on IOException.
+        } catch (Exception e) { // Catch any other unexpected exceptions
+            logger.error("Unexpected error during component diagram generation orchestration: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
         }
 
         // Usecase Diagram
@@ -103,12 +92,10 @@ public class DiagramServiceImpl implements DiagramService {
                 diagramPaths.put(DiagramType.USECASE_DIAGRAM, usecaseDiagramPath);
                 logger.info("Usecase Diagram generation successful. Path: {}", usecaseDiagramPath);
             } else {
-                logger.warn("Usecase Diagram generation returned null.");
-                // The generateUsecaseDiagram method already logs its PlantUML source on IOException.
+                logger.warn("Usecase Diagram generation returned null. This might be due to an issue with PlantUML setup. Check previous logs from generateUsecaseDiagram.");
             }
-        } catch (Exception e) {
-            logger.error("Error generating usecase diagram: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
-            // The generateUsecaseDiagram method already logs its PlantUML source on IOException.
+        } catch (Exception e) { // Catch any other unexpected exceptions
+            logger.error("Unexpected error during usecase diagram generation orchestration: {}. Type: {}", e.getMessage(), e.getClass().getName(), e);
         }
         
         logger.info("Final diagram paths collected: {}", diagramPaths);
@@ -330,6 +317,44 @@ public class DiagramServiceImpl implements DiagramService {
         }
     }
 
+    private String getCleanParticipantName(String rawCallFlowItem) {
+        String name = rawCallFlowItem;
+        if (name.startsWith("UNRESOLVED_CALL: ")) name = name.substring("UNRESOLVED_CALL: ".length());
+        else if (name.startsWith("UNRESOLVED_OR_EXTERNAL: ")) name = name.substring("UNRESOLVED_OR_EXTERNAL: ".length());
+        else if (name.startsWith("FRAMEWORK_CALL (Spring Data): ")) name = name.substring("FRAMEWORK_CALL (Spring Data): ".length());
+        else if (name.startsWith("FRAMEWORK_CALL (JDK/Lib): ")) name = name.substring("FRAMEWORK_CALL (JDK/Lib): ".length());
+        else if (name.startsWith("ERROR: ")) name = name.substring("ERROR: ".length());
+
+        // Extract class name (part before method and parameters)
+        int methodParenIndex = name.indexOf('(');
+        if (methodParenIndex != -1) {
+            name = name.substring(0, methodParenIndex);
+        }
+        return name.contains(".") ? name.substring(0, name.lastIndexOf('.')) : name;
+    }
+
+    private String getCleanCallLabel(String rawCallFlowItem) {
+        String label = rawCallFlowItem;
+        // Strip prefixes for the label as well, but keep the method part
+        if (label.startsWith("UNRESOLVED_CALL: ")) label = label.substring("UNRESOLVED_CALL: ".length());
+        else if (label.startsWith("UNRESOLVED_OR_EXTERNAL: ")) label = label.substring("UNRESOLVED_OR_EXTERNAL: ".length());
+        else if (label.startsWith("FRAMEWORK_CALL (Spring Data): ")) label = label.substring("FRAMEWORK_CALL (Spring Data): ".length());
+        else if (label.startsWith("FRAMEWORK_CALL (JDK/Lib): ")) label = label.substring("FRAMEWORK_CALL (JDK/Lib): ".length());
+        else if (label.startsWith("ERROR: ")) label = label.substring("ERROR: ".length());
+        
+        // Extract method name with parameters
+        int lastDotIndex = label.lastIndexOf('.');
+        if (label.contains("(") && label.contains(")") && lastDotIndex != -1 && lastDotIndex < label.indexOf('(')) {
+             // Handles FQNs like com.package.Class.method(params)
+            return label.substring(lastDotIndex + 1);
+        } else if (label.contains("(") && label.contains(")")) {
+            // Handles cases like UNRESOLVED_CALL: method(params) where there might not be a class part
+            return label; // Or simplify if needed, e.g. label.substring(label.lastIndexOf(':') + 1).trim();
+        }
+        // Fallback for simple method names or other placeholders if not a full signature
+        return label.substring(label.lastIndexOf('.') + 1); // Default to part after last dot
+    }
+
     @Override
     public String generateSequenceDiagram(List<String> callFlow, String outputDir, String diagramName) {
         if (callFlow == null || callFlow.isEmpty()) {
@@ -341,9 +366,11 @@ public class DiagramServiceImpl implements DiagramService {
         plantUmlSource.append("autonumber\n");
         // Use lifelines for each class in the flow
         List<String> lifelines = new java.util.ArrayList<>();
-        for (String fqn : callFlow) {
-            String className = fqn.contains(".") ? fqn.substring(0, fqn.lastIndexOf('.')) : fqn;
-            if (!lifelines.contains(className)) lifelines.add(className);
+        for (String rawFqn : callFlow) {
+            String className = getCleanParticipantName(rawFqn);
+            if (!lifelines.contains(className)) {
+                lifelines.add(className);
+            }
         }
         // Declare participants
         for (String className : lifelines) {
@@ -352,14 +379,15 @@ public class DiagramServiceImpl implements DiagramService {
         }
         // Draw calls
         for (int i = 0; i < callFlow.size() - 1; i++) {
-            String from = callFlow.get(i);
-            String to = callFlow.get(i + 1);
-            String fromClass = from.contains(".") ? from.substring(0, from.lastIndexOf('.')) : from;
-            String toClass = to.contains(".") ? to.substring(0, to.lastIndexOf('.')) : to;
-            String fromMethod = from.substring(from.lastIndexOf('.') + 1);
-            String toMethod = to.substring(to.lastIndexOf('.') + 1);
+            String rawFrom = callFlow.get(i);
+            String rawTo = callFlow.get(i + 1);
+
+            String fromClass = getCleanParticipantName(rawFrom);
+            String toClass = getCleanParticipantName(rawTo);
+            String callLabel = getCleanCallLabel(rawTo);
+
             plantUmlSource.append("\"").append(fromClass).append("\" -> \"")
-                .append(toClass).append("\": ").append(toMethod).append("()\n");
+                .append(toClass).append("\": ").append(callLabel).append("\n");
         }
         plantUmlSource.append("@enduml\n");
         try {

@@ -12,7 +12,7 @@ public class CallFlowAnalyzer {
     private static final Logger logger = LoggerFactory.getLogger(CallFlowAnalyzer.class); // Uncomment if logger is used
     
     // Set to track methods we've already warned about to reduce log noise
-    private Set<String> warnedMethods = new HashSet<>();
+    private Set<String> warnedSignatures = new HashSet<>();
 
     // Method to initiate call flow generation from a single entrypoint (can be used for specific tests or kept for compatibility)
     public List<String> getCallFlow(String entryMethodFQN, List<ClassMetadata> classes) {
@@ -35,7 +35,7 @@ public class CallFlowAnalyzer {
         logger.info("Built methodMap with {} entries and classMap with {} entries.", methodMap.size(), classMap.size());
 
         // Print all method map keys for debugging
-        logger.debug("Method map keys:" + methodMap.keySet());
+        // logger.debug("Method map keys:" + methodMap.keySet());
         // for (String key : methodMap.keySet()) {
         //     logger.debug("  methodMap key: {}", key);
         // }
@@ -61,7 +61,7 @@ public class CallFlowAnalyzer {
                                                     (m.getParameters() != null ? String.join(", ", m.getParameters()) : "") +
                                                     ")";
                         logger.debug("Attempting DFS for entry point: {}", entryPointDisplayFQN);
-                        logger.debug("  Entry point FQN: {}", entryPointBaseFQN);
+                        logger.debug("  Entry point FQN for methodMap lookup: {}", entryPointBaseFQN);
                         logger.debug("  Called methods for this entry point:");
                         if (m.getCalledMethods() != null) {
                             for (String called : m.getCalledMethods()) {
@@ -102,35 +102,56 @@ public class CallFlowAnalyzer {
 
             if (cls.getMethods() != null) {
                 for (MethodMetadata m : cls.getMethods()) {
-                    // Store reference to parent class and package in method metadata if not already there
-                    // This should ideally be done during parsing (JavaParserServiceImpl)
+                    // Ensure className and packageName are set on methodMeta if not already
                     if (m.getClassName() == null) m.setClassName(cls.getName());
                     if (m.getPackageName() == null) m.setPackageName(cls.getPackageName());
 
-                    String baseMethodFQN = classFQN + "." + m.getName();
-                    methodMap.put(baseMethodFQN, m);
+                    String baseMethodFQN = classFQN + "." + m.getName(); // Key for methodMap is still base FQN
+                    // If we wanted to support overloading directly in methodMap, the key would need to include param types.
+                    // For now, we rely on calledMethodSignatures from parser being more specific.
+                    methodMap.put(baseMethodFQN, m); 
                 }
             }
         }
     }
 
-    private String stripParams(String fqnWithParams) {
-        if (fqnWithParams == null) return null;
-        int paramIndex = fqnWithParams.indexOf('(');
+    // Helper to extract base FQN (Class.method) from a signature like Class.method(paramType1,paramType2)
+    private String getBaseFqn(String signature) {
+        if (signature == null) return null;
+        int paramIndex = signature.indexOf('(');
         if (paramIndex != -1) {
-            return fqnWithParams.substring(0, paramIndex);
+            return signature.substring(0, paramIndex);
         }
-        return fqnWithParams;
+        return signature;
     }
 
-    private void dfs(String methodLookupKey,
+    private void dfs(String methodLookupKey, // This is expected to be a base FQN (Class.method) for initial lookup
                      Map<String, MethodMetadata> methodMap,
                      List<String> flow,
                      Set<String> visited,
                      Map<String, ClassMetadata> classMap,
                      List<ClassMetadata> allProjectClasses) {
 
-        String baseMethodFQN = stripParams(methodLookupKey);
+        logger.debug("DFS: Input methodLookupKey: '{}'", methodLookupKey);
+
+        // If the lookup key already indicates a special type (e.g., from JavaParserServiceImpl fallback),
+        // add it directly and don't recurse further down this path.
+        if (methodLookupKey != null && 
+            (methodLookupKey.startsWith("UNRESOLVED_CALL:") || 
+             methodLookupKey.startsWith("FRAMEWORK_CALL:") || // Future-proofing if parser adds this
+             methodLookupKey.startsWith("EXTERNAL_LIB:") || // Future-proofing
+             methodLookupKey.startsWith("ERROR:") )) { // Error during parsing
+            logger.debug("DFS: methodLookupKey '{}' is pre-classified. Adding to flow and returning.", methodLookupKey);
+            // Ensure it's not a duplicate of the very last item to avoid redundant entries if parser and analyzer both add prefixes.
+            // This simple check might need refinement based on how prefixes are layered.
+            if (flow.isEmpty() || !flow.get(flow.size() - 1).equals(methodLookupKey)) {
+                 flow.add(methodLookupKey);
+            }
+            // Do not remove from visited here, as this is a terminal node for this path.
+            return;
+        }
+        
+        String baseMethodFQN = getBaseFqn(methodLookupKey); 
         logger.debug("DFS: Processing key '{}', base FQN '{}'. Visited size: {}. Current flow size: {}", methodLookupKey, baseMethodFQN, visited.size(), flow.size());
 
         if (baseMethodFQN == null) {
@@ -139,105 +160,99 @@ public class CallFlowAnalyzer {
             return;
         }
 
-        if (!visited.add(baseMethodFQN)) {
-            logger.debug("DFS: Method {} already visited. Skipping.", baseMethodFQN);
+        // Visited set should track the specific signature if possible, though currently uses baseFQN.
+        // If methodLookupKey could carry parameter info, visited could be more precise.
+        if (!visited.add(baseMethodFQN)) { // For now, cycle detection is on base FQN
+            logger.debug("DFS: Method {} already visited (based on base FQN). Skipping.", baseMethodFQN);
             return;
         }
 
-        MethodMetadata currentMethodMeta = methodMap.get(baseMethodFQN);
+        MethodMetadata currentMethodMeta = methodMap.get(baseMethodFQN); 
+        // If currentMethodMeta is null, it means the base FQN wasn't in our map.
+        // This can happen if the called method is from an external lib not fully parsed, or if a class was missed.
+
         if (currentMethodMeta == null) {
-            // Improved fallback mechanism for method resolution
-            boolean found = false;
-            
-            // 1. First attempt: Try to match by method name across all classes with sophisticated matching
-            String methodNameOnly = baseMethodFQN.contains(".") ? baseMethodFQN.substring(baseMethodFQN.lastIndexOf('.') + 1) : baseMethodFQN;
-            String expectedClassName = baseMethodFQN.contains(".") ? 
-                baseMethodFQN.substring(0, baseMethodFQN.lastIndexOf('.')) : "";
-            
-            if (!expectedClassName.isEmpty() && expectedClassName.contains(".")) {
-                expectedClassName = expectedClassName.substring(expectedClassName.lastIndexOf('.') + 1);
+            // Fallback: try to find a match if methodLookupKey had parameters and differs from baseMethodFQN
+            // This part might be less relevant if methodLookupKey is always base.
+            if (!baseMethodFQN.equals(methodLookupKey) && methodLookupKey.contains("(")) {
+                 // Try a lookup with the original key if it was more specific, though methodMap uses base FQN keys.
+                 // This path is unlikely to find anything new unless methodMap keys change.
             }
-            
-            // Try to find by class name + method name
-            if (!expectedClassName.isEmpty()) {
+
+            // If still not found, apply previous fallback logic (though it might be less effective now)
+            boolean foundViaFallback = false;
+            String methodNameOnly = baseMethodFQN.contains(".") ? baseMethodFQN.substring(baseMethodFQN.lastIndexOf('.') + 1) : baseMethodFQN;
+            String expectedClassNameFromFQN = baseMethodFQN.contains(".") ? baseMethodFQN.substring(0, baseMethodFQN.lastIndexOf('.')) : "";
+
+            // Try to find by class name + method name (iterating all methods)
+            if (!expectedClassNameFromFQN.isEmpty()) {
                 for (Map.Entry<String, MethodMetadata> entry : methodMap.entrySet()) {
                     MethodMetadata m = entry.getValue();
-                    if (m.getName().equals(methodNameOnly) && 
-                        m.getClassName() != null && 
-                        m.getClassName().equals(expectedClassName)) {
+                    String methodClassName = (m.getPackageName() != null && !m.getPackageName().isEmpty() ? m.getPackageName() + "." : "") + m.getClassName();
+                    if (m.getName().equals(methodNameOnly) && methodClassName.equals(expectedClassNameFromFQN)) {
                         currentMethodMeta = m;
-                        logger.debug("DFS: Found method by class+method name matching: {}.{}", expectedClassName, methodNameOnly);
-                        found = true;
+                        logger.debug("DFS: Found method by FQN class + method name matching: {}.{}", expectedClassNameFromFQN, methodNameOnly);
+                        foundViaFallback = true;
                         break;
                     }
                 }
             }
-            
-            // 2. Second attempt: Try exact method name match
-            if (!found) {
-                for (Map.Entry<String, MethodMetadata> entry : methodMap.entrySet()) {
-                    if (entry.getValue().getName().equals(methodNameOnly)) {
-                        currentMethodMeta = entry.getValue();
-                        logger.debug("DFS: Found method by exact name match: {}", methodNameOnly);
-                        found = true;
-                        break;
+
+            if (!foundViaFallback) {
+                 // Only warn once per method signature to reduce log noise
+                String warningSignature = methodLookupKey; // Use the original lookup key for warning
+                
+                // Check for Spring Data Repository common methods
+                String calledClassName = baseMethodFQN.contains(".") ? baseMethodFQN.substring(0, baseMethodFQN.lastIndexOf('.')) : "";
+                String calledMethodName = baseMethodFQN.contains(".") ? baseMethodFQN.substring(baseMethodFQN.lastIndexOf('.') + 1) : baseMethodFQN;
+                ClassMetadata calledClassMeta = classMap.get(calledClassName);
+                boolean isKnownRepositoryCall = false;
+                if (calledClassMeta != null && "repository".equalsIgnoreCase(calledClassMeta.getType())) {
+                    if (calledMethodName.startsWith("save") || calledMethodName.startsWith("find") || 
+                        calledMethodName.startsWith("delete") || calledMethodName.startsWith("exists") ||
+                        calledMethodName.startsWith("count")) {
+                        flow.add("FRAMEWORK_CALL (Spring Data): " + warningSignature);
+                        isKnownRepositoryCall = true;
                     }
                 }
-            }
-            
-            // 3. Third attempt: Try to handle common framework methods with special handling
-            if (!found && (baseMethodFQN.contains("Repository.") || 
-                           baseMethodFQN.contains("CrudRepository.") ||
-                           baseMethodFQN.contains("JpaRepository.") ||
-                           baseMethodFQN.contains("Optional.") ||
-                           baseMethodFQN.contains("List."))) {
-                
-                // Special handling for common framework methods - create a synthetic node
-                // but don't add warning to logs as these are expected
-                String simpleMethodName = methodNameOnly;
-                String frameworkClass = "";
-                
-                if (baseMethodFQN.contains("Repository")) frameworkClass = "Repository";
-                else if (baseMethodFQN.contains("Optional")) frameworkClass = "Optional";
-                else if (baseMethodFQN.contains("List")) frameworkClass = "List";
-                
-                flow.add("Framework method: " + frameworkClass + "." + simpleMethodName + "()");
-                logger.debug("DFS: Adding framework method placeholder for: {}", baseMethodFQN);
-                return;
-            }
-            
-            // If still not found after all attempts
-            if (!found) {
-                if (!baseMethodFQN.equals(methodLookupKey)) {
-                    logger.debug("DFS: Method {} not found by base FQN. Original key {} was different (had params).", baseMethodFQN, methodLookupKey);
+
+                // Check for other common unresolved patterns (JDK, common libs)
+                boolean isCommonJdkOrLib = false;
+                if (!isKnownRepositoryCall) {
+                    if (baseMethodFQN.startsWith("java.util.Optional") || baseMethodFQN.startsWith("java.util.regex") || 
+                        baseMethodFQN.startsWith("java.lang.String") || baseMethodFQN.startsWith("org.slf4j.Logger") ||
+                        baseMethodFQN.startsWith("java.time.LocalDateTime") || baseMethodFQN.startsWith("java.util.Objects") ||
+                        baseMethodFQN.startsWith("org.springframework.validation") || baseMethodFQN.startsWith("org.springframework.context.support")) {
+                        flow.add("FRAMEWORK_CALL (JDK/Lib): " + warningSignature);
+                        isCommonJdkOrLib = true;
+                    }
                 }
-                
-                // Only warn once per method FQN to reduce log noise
-                if (!warnedMethods.contains(baseMethodFQN)) {
-                    logger.warn("DFS: All attempts failed to resolve path for '{}' called from '{}'. Skipping unresolved path.", 
-                        baseMethodFQN, 
-                        flow.isEmpty() ? "Entry Point" : flow.get(flow.size() - 1));
-                    warnedMethods.add(baseMethodFQN);
+
+                if (!isKnownRepositoryCall && !isCommonJdkOrLib) {
+                    if (!warnedSignatures.contains(warningSignature)) {
+                        logger.warn("DFS: MethodMetadata not found for '{}' (base FQN: '{}'). Called from '{}'. It might be an external library method or a parsing gap. Adding placeholder.", 
+                            warningSignature, baseMethodFQN,
+                            flow.isEmpty() ? "Entry Point" : flow.get(flow.size() - 1));
+                        warnedSignatures.add(warningSignature);
+                    }
+                    flow.add("UNRESOLVED_OR_EXTERNAL: " + warningSignature);
                 }
-                
-                // Add node to flow anyway to maintain graph integrity
-                if (flow.isEmpty()) {
-                    flow.add(methodLookupKey + " (Entry Point)");
-                } else {
-                    // Add as unresolved but don't break the flow
-                    flow.add("UNRESOLVED: " + methodLookupKey);
-                }
+                visited.remove(baseMethodFQN); // Allow re-visiting if a different call path leads here through a resolved method
                 return;
             }
         }
 
-        // --- Parameter and local variable type tracking ---
+        // --- Parameter and local variable type tracking (uses FQNs from MethodMetadata) ---
         Map<String, String> paramTypeMap = new HashMap<>();
         if (currentMethodMeta.getParameters() != null) {
             for (String param : currentMethodMeta.getParameters()) {
                 String[] parts = param.trim().split(" ");
                 if (parts.length == 2) {
-                    paramTypeMap.put(parts[1], parts[0]);
+                    paramTypeMap.put(parts[1], parts[0]); // variable name -> type
+                } else if (parts.length == 1 && !parts[0].isEmpty()) {
+                    // Handle cases where parameter might just be a type (e.g. from some unresolved scenarios)
+                    // For now, we don't add these to paramTypeMap as they lack a name.
+                    logger.trace("DFS: Parameter '{}' in method lookup key '{}' seems to be type-only.", param, methodLookupKey);
                 }
             }
         }
@@ -261,7 +276,25 @@ public class CallFlowAnalyzer {
 
         if (flow.isEmpty()) {
             logger.debug("DFS: Adding entry point {} to flow.", fqnForDisplay);
-            flow.add(fqnForDisplay);
+            flow.add(fqnForDisplay); 
+        } else {
+            // Avoid adding the same method signature back-to-back if it's already the last element
+            // This can happen if the call was to itself (direct recursion handled by 'visited')
+            // or if the parsing logic leads to it.
+            if (!flow.get(flow.size()-1).equals(fqnForDisplay)) {
+                 // Check if the last element was an UNRESOLVED_OR_EXTERNAL placeholder for the current method
+                 // This might occur if a method call resolves to currentMethodMeta, but was initially added as unresolved.
+                 String lastElement = flow.get(flow.size()-1);
+                 if (lastElement.startsWith("UNRESOLVED_OR_EXTERNAL: ") && getBaseFqn(lastElement.substring("UNRESOLVED_OR_EXTERNAL: ".length())).equals(baseMethodFQN)) {
+                    logger.debug("DFS: Replacing placeholder '{}' with resolved method '{}'", lastElement, fqnForDisplay);
+                    flow.set(flow.size()-1, fqnForDisplay);
+                 } else {
+                    logger.debug("DFS: Adding {} to flow. Last element was {}.", fqnForDisplay, lastElement);
+                    flow.add(fqnForDisplay);
+                 }
+            } else {
+                 logger.debug("DFS: Method {} is already the last element in the flow. Not re-adding.", fqnForDisplay);
+            }
         }
 
         if (currentMethodMeta.getCalledMethods() != null && !currentMethodMeta.getCalledMethods().isEmpty()) {
@@ -275,146 +308,63 @@ public class CallFlowAnalyzer {
 
             for (String calledMethodSignatureFromParser : currentMethodMeta.getCalledMethods()) {
                 logger.debug("DFS: Processing called method signature from parser: '{}'", calledMethodSignatureFromParser);
-                String strippedCalledMethod = stripParams(calledMethodSignatureFromParser);
-                if (strippedCalledMethod == null) {
-                    logger.warn("DFS: Stripped called method is null for signature: '{}'", calledMethodSignatureFromParser);
+                
+                // The calledMethodSignatureFromParser should ideally be an FQN with parameter types if resolved by JavaParserServiceImpl
+                String calledBaseFQN = getBaseFqn(calledMethodSignatureFromParser);
+                if (calledBaseFQN == null) {
+                    logger.warn("DFS: Stripped base FQN is null for signature: '{}'", calledMethodSignatureFromParser);
                     flow.add("ERROR: Null stripped method for " + calledMethodSignatureFromParser);
                     continue;
                 }
+
                 boolean resolvedAndTraversed = false;
 
-                // --- Graceful fallback for framework-injected fields ---
-                if (strippedCalledMethod.startsWith("log.")) {
-                    logger.debug("DFS: Skipping framework-injected field 'log' for '{}'.", strippedCalledMethod);
-                    continue;
-                }
-                // --- End fallback ---
+                // Attempt 1: Direct lookup of the base FQN in methodMap.
+                // This is the primary lookup. If calledMethodSignatureFromParser has params, they are for display/matching, not map key.
+                logger.debug("DFS: Attempt 1 - Direct lookup for base '{}' (from '{}')", calledBaseFQN, calledMethodSignatureFromParser);
+                MethodMetadata targetMethodMeta = methodMap.get(calledBaseFQN);
 
-                // --- Parameter type and chained call resolution ---
-                if (!resolvedAndTraversed && strippedCalledMethod.contains(".")) {
-                    String[] parts = strippedCalledMethod.split("\\.");
-                    if (parts.length > 1) {
-                        String currentTypeFQN = null;
-                        String currentName = parts[0];
-                        // Step 1: Resolve the type of the first segment (parameter or field)
-                        if (paramTypeMap.containsKey(currentName)) {
-                            String paramType = paramTypeMap.get(currentName);
-                            for (ClassMetadata searchCls : allProjectClasses) {
-                                if (searchCls.getName().equals(paramType)) {
-                                    currentTypeFQN = (searchCls.getPackageName() != null && !searchCls.getPackageName().isEmpty() ? searchCls.getPackageName() + "." : "") + searchCls.getName();
-                                    break;
-                                }
-                            }
-                            if (currentTypeFQN == null) {
-                                currentTypeFQN = paramType;
-                            }
-                        } else if (currentClass != null && currentClass.getFields() != null) {
-                            for (com.codedocgen.model.FieldMetadata field : currentClass.getFields()) {
-                                String fieldNameInDecl = field.getName();
-                                if (fieldNameInDecl != null && fieldNameInDecl.equals(currentName)) {
-                                    String fieldTypeNameSimple = field.getType();
-                                    if (fieldTypeNameSimple != null) {
-                                        fieldTypeNameSimple = fieldTypeNameSimple.replaceAll("<.*?>", "");
-                                        for (ClassMetadata searchCls : allProjectClasses) {
-                                            if (searchCls.getName().equals(fieldTypeNameSimple)) {
-                                                currentTypeFQN = (searchCls.getPackageName() != null && !searchCls.getPackageName().isEmpty() ? searchCls.getPackageName() + "." : "") + searchCls.getName();
-                                                break;
-                                            }
-                                        }
-                                        if (currentTypeFQN == null) {
-                                            currentTypeFQN = fieldTypeNameSimple;
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        // Step 2: Recursively resolve each method in the chain
-                        boolean chainResolved = true;
-                        for (int i = 1; i < parts.length; i++) {
-                            String methodName = parts[i];
-                            if (currentTypeFQN == null) {
-                                chainResolved = false;
-                                break;
-                            }
-                            String candidateFQN = currentTypeFQN + "." + methodName;
-                            MethodMetadata methodMeta = methodMap.get(candidateFQN);
-                            if (methodMeta != null) {
-                                // If this is the last segment, add to flow and recurse
-                                if (i == parts.length - 1) {
-                                    String resolvedTargetDisplayFQN = (methodMeta.getPackageName() != null && !methodMeta.getPackageName().isEmpty() ? methodMeta.getPackageName() + "." : "") +
-                                                                      methodMeta.getClassName() + "." +
-                                                                      methodMeta.getName() +
-                                                                      "(" + (methodMeta.getParameters() != null ? String.join(", ", methodMeta.getParameters()) : "") + ")";
-                                    logger.debug("DFS: Chained call resolution success. Adding '{}' to flow and recursing.", resolvedTargetDisplayFQN);
-                                    flow.add(" -> " + resolvedTargetDisplayFQN);
-                                    dfs(candidateFQN, methodMap, flow, visited, classMap, allProjectClasses);
-                                    resolvedAndTraversed = true;
-                                } else {
-                                    // Update currentTypeFQN to the return type of this method
-                                    String returnType = methodMeta.getReturnType();
-                                    // Try to find FQN in allProjectClasses
-                                    String foundFQN = null;
-                                    for (ClassMetadata searchCls : allProjectClasses) {
-                                        if (searchCls.getName().equals(returnType)) {
-                                            foundFQN = (searchCls.getPackageName() != null && !searchCls.getPackageName().isEmpty() ? searchCls.getPackageName() + "." : "") + searchCls.getName();
-                                            break;
-                                        }
-                                    }
-                                    if (foundFQN != null) {
-                                        currentTypeFQN = foundFQN;
-                                    } else {
-                                        currentTypeFQN = returnType;
-                                    }
-                                }
-                            } else {
-                                chainResolved = false;
-                                break;
-                            }
-                        }
-                        if (chainResolved && resolvedAndTraversed) {
-                            // Already handled in the loop
-                        }
-                    }
-                }
-                // --- End parameter type and chained call resolution ---
+                if (targetMethodMeta != null) {
+                    // Now we have a candidate class. If calledMethodSignatureFromParser included params, 
+                    // we could try to find an overload in targetMethodMeta's class that matches.
+                    // For now, we assume base FQN match is sufficient to proceed with recursion using that targetMethodMeta.
+                    // The fqnForDisplay of this targetMethodMeta will show its actual parameters.
 
-                // Attempt 1: Direct lookup of stripped signature in methodMap (covers FQNs from SymbolSolver)
+                    // Construct the display FQN for the target method based on its metadata
+                    String targetDisplayFQN = (targetMethodMeta.getPackageName() != null && !targetMethodMeta.getPackageName().isEmpty() ? targetMethodMeta.getPackageName() + "." : "") +
+                                              targetMethodMeta.getClassName() + "." +
+                                              targetMethodMeta.getName() +
+                                              "(" + (targetMethodMeta.getParameters() != null ? String.join(", ", targetMethodMeta.getParameters()) : "") + ")";
+                    
+                    logger.debug("DFS: Attempt 1 Potential Match. Target display FQN: '{}'. Recursing with base key: '{}'", targetDisplayFQN, calledBaseFQN);
+                    // flow.add(" -> " + targetDisplayFQN); // Added inside the recursive DFS call if new
+                    dfs(calledBaseFQN, methodMap, flow, visited, classMap, allProjectClasses); // Recurse with base FQN
+                    resolvedAndTraversed = true;
+                } else {
+                    logger.debug("DFS: Attempt 1 No direct match in methodMap for base '{}'", calledBaseFQN);
+                }
+
+                // Fallback for chained calls (e.g., obj.method1().method2())
+                // This needs careful implementation if calledMethodSignatureFromParser is already specific.
+                // The JavaParserServiceImpl should ideally resolve these chains into direct, fully-qualified calls.
+                // If it still appears as a chain here, it means the parser couldn't fully resolve it.
+                if (!resolvedAndTraversed && calledMethodSignatureFromParser.contains(".") && !calledMethodSignatureFromParser.startsWith(currentMethodMeta.getPackageName() !=null ? currentMethodMeta.getPackageName() : "")) {
+                     // This logic might be too simplistic if the chained call isn't easily resolvable with current context
+                     // Consider if this fallback is still needed given improved parser.
+                     // flow.add(" -> CHAINED_CALL_PLACEHOLDER: " + calledMethodSignatureFromParser);
+                     // resolvedAndTraversed = true; // Mark as handled to avoid unresolved warning for this specific case
+                }
+
+
+                // If not resolved by direct lookup or specific handlers:
                 if (!resolvedAndTraversed) {
-                    logger.debug("DFS: Attempt 1 - Direct lookup for '{}'", strippedCalledMethod);
-                    MethodMetadata targetMethodMeta = methodMap.get(strippedCalledMethod);
-                    if (targetMethodMeta != null) {
-                        String targetDisplayFQN = (targetMethodMeta.getPackageName() != null && !targetMethodMeta.getPackageName().isEmpty() ? targetMethodMeta.getPackageName() + "." : "") +
-                                                  targetMethodMeta.getClassName() + "." +
-                                                  targetMethodMeta.getName() +
-                                                  "(" + (targetMethodMeta.getParameters() != null ? String.join(", ", targetMethodMeta.getParameters()) : "") + ")";
-                        logger.debug("DFS: Attempt 1 Success. Adding '{}' to flow and recursing.", targetDisplayFQN);
-                        flow.add(" -> " + targetDisplayFQN);
-                        dfs(strippedCalledMethod, methodMap, flow, visited, classMap, allProjectClasses);
-                        resolvedAndTraversed = true;
+                    if (!warnedSignatures.contains(calledMethodSignatureFromParser)) {
+                        logger.warn("DFS: Method '{}' called from '{}' could not be resolved in methodMap or by fallbacks. Adding as UNRESOLVED.", 
+                            calledMethodSignatureFromParser, fqnForDisplay);
+                        warnedSignatures.add(calledMethodSignatureFromParser);
                     }
-                }
-
-                // Attempt 3: Simple method name (likely in current class or an import that wasn't fully resolved by parser)
-                if (!resolvedAndTraversed && !strippedCalledMethod.contains(".")) {
-                    logger.debug("DFS: Attempt 3 - Simple name resolution for '{}' in current class context '{}'", strippedCalledMethod, currentMethodClassFQN);
-                    String fqnInCurrentClass = currentMethodClassFQN + "." + strippedCalledMethod;
-                    MethodMetadata targetInCurrentClass = methodMap.get(fqnInCurrentClass);
-                    if (targetInCurrentClass != null) {
-                         String targetDisplayFQN = (targetInCurrentClass.getPackageName() != null && !targetInCurrentClass.getPackageName().isEmpty() ? targetInCurrentClass.getPackageName() + "." : "") +
-                                                   targetInCurrentClass.getClassName() + "." +
-                                                   targetInCurrentClass.getName() +
-                                                   "(" + (targetInCurrentClass.getParameters() != null ? String.join(", ", targetInCurrentClass.getParameters()) : "") + ")";
-                        logger.debug("DFS: Attempt 3 Success. Adding '{}' to flow and recursing.", targetDisplayFQN);
-                        flow.add(" -> " + targetDisplayFQN);
-                        dfs(fqnInCurrentClass, methodMap, flow, visited, classMap, allProjectClasses);
-                        resolvedAndTraversed = true;
-                    }
-                }
-
-                if(!resolvedAndTraversed) {
-                    logger.warn("DFS: All attempts failed to resolve path for '{}' called from '{}'. Skipping unresolved path.", calledMethodSignatureFromParser, fqnForDisplay);
-                    // Do not add UNRESOLVED_PATH to the flow; just skip
+                    flow.add("UNRESOLVED_CALL: " + calledMethodSignatureFromParser);
+                    // Do not recurse for unresolved calls
                 }
             }
         } else {

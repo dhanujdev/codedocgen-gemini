@@ -233,37 +233,48 @@ public class DocumentationServiceImpl implements DocumentationService {
     }
 
     @Override
-    public String generateProjectSummary(ParsedDataResponse parsedData) {
-        if (parsedData == null) return "Project data is not available.";
+    public String generateProjectSummary(ParsedDataResponse analysisResult) {
+        if (analysisResult == null) {
+            return "No analysis data available to generate summary.";
+        }
+
+        logger.info("[SummaryGen] isSpringBootProject: {}", analysisResult.isSpringBootProject());
+        logger.info("[SummaryGen] springBootVersion: {}", analysisResult.getSpringBootVersion());
 
         StringBuilder summary = new StringBuilder();
-        summary.append("Project Name: ").append(parsedData.getProjectName()).append(".\n");
-        summary.append("Type: ").append(parsedData.getProjectType()).append(".\n");
-        if (parsedData.isSpringBootProject() && parsedData.getSpringBootVersion() != null) {
-            summary.append("Spring Boot Version: ").append(parsedData.getSpringBootVersion()).append(".\n");
+        summary.append("Project Name: ").append(analysisResult.getProjectName()).append(". ");
+        summary.append("Type: ").append(analysisResult.getProjectType()).append(". ");
+        
+        if (analysisResult.isSpringBootProject() && analysisResult.getSpringBootVersion() != null && !analysisResult.getSpringBootVersion().isEmpty()) {
+            summary.append("Spring Boot Version: ").append(analysisResult.getSpringBootVersion()).append(". ");
+        } else if (analysisResult.isSpringBootProject()) {
+            summary.append("Spring Boot: Yes (version not detected). ");
+        } 
+        else {
+            summary.append("Spring Boot: No. ");
         }
-        if (parsedData.getClasses() != null) {
-            summary.append("Contains ").append(parsedData.getClasses().size()).append(" classes/interfaces/enums.");
-            long controllerCount = parsedData.getClasses().stream().filter(c -> "controller".equalsIgnoreCase(c.getType())).count();
-            long serviceCount = parsedData.getClasses().stream().filter(c -> "service".equalsIgnoreCase(c.getType())).count();
-            long repositoryCount = parsedData.getClasses().stream().filter(c -> "repository".equalsIgnoreCase(c.getType())).count();
-            summary.append(" (Controllers: ").append(controllerCount)
-                   .append(", Services: ").append(serviceCount)
-                   .append(", Repositories: ").append(repositoryCount).append(").\n");
-        }
-        if (parsedData.getEndpoints() != null) {
-            summary.append("Exposes ").append(parsedData.getEndpoints().size()).append(" API endpoints.");
-            long restEndpoints = parsedData.getEndpoints().stream().filter(e -> "REST".equalsIgnoreCase(e.getType())).count();
-            long soapEndpoints = parsedData.getEndpoints().stream().filter(e -> "SOAP".equalsIgnoreCase(e.getType())).count();
+
+        int classCount = analysisResult.getClasses() != null ? analysisResult.getClasses().size() : 0;
+        summary.append("Contains ").append(classCount).append(" classes/interfaces/enums.");
+        long controllerCount = analysisResult.getClasses().stream().filter(c -> "controller".equalsIgnoreCase(c.getType())).count();
+        long serviceCount = analysisResult.getClasses().stream().filter(c -> "service".equalsIgnoreCase(c.getType())).count();
+        long repositoryCount = analysisResult.getClasses().stream().filter(c -> "repository".equalsIgnoreCase(c.getType())).count();
+        summary.append(" (Controllers: ").append(controllerCount)
+               .append(", Services: ").append(serviceCount)
+               .append(", Repositories: ").append(repositoryCount).append(").\n");
+        if (analysisResult.getEndpoints() != null) {
+            summary.append("Exposes ").append(analysisResult.getEndpoints().size()).append(" API endpoints.");
+            long restEndpoints = analysisResult.getEndpoints().stream().filter(e -> "REST".equalsIgnoreCase(e.getType())).count();
+            long soapEndpoints = analysisResult.getEndpoints().stream().filter(e -> "SOAP".equalsIgnoreCase(e.getType())).count();
             if (restEndpoints > 0) summary.append(" (").append(restEndpoints).append(" REST");
             if (soapEndpoints > 0) summary.append(restEndpoints > 0 ? ", " : " (").append(soapEndpoints).append(" SOAP");
             if (restEndpoints > 0 || soapEndpoints > 0) summary.append(").");
             summary.append("\n");
         }
-        if (parsedData.getFeatureFiles() != null && !parsedData.getFeatureFiles().isEmpty()) {
-             summary.append("Includes ").append(parsedData.getFeatureFiles().size()).append(" Gherkin feature files for BDD testing.\n");
+        if (analysisResult.getFeatureFiles() != null && !analysisResult.getFeatureFiles().isEmpty()) {
+             summary.append("Includes ").append(analysisResult.getFeatureFiles().size()).append(" Gherkin feature files for BDD testing.\n");
         }
-        if (parsedData.getOpenApiSpec() != null && !parsedData.getOpenApiSpec().isEmpty()){
+        if (analysisResult.getOpenApiSpec() != null && !analysisResult.getOpenApiSpec().isEmpty()){
             summary.append("An OpenAPI (Swagger) specification is available for REST APIs.\n");
         }
         // TODO: Could be enhanced with more insights, e.g., common libraries, tech stack details.

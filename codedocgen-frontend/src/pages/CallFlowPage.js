@@ -23,10 +23,11 @@ const CallFlowPage = ({ analysisResult, repoName }) => {
 
     let collected = [];
     // Correctly access .diagrams and .sequenceDiagrams from the analysisResult object
-    const { diagrams: generalDiagramMap, sequenceDiagrams: specificSequenceDiagrams } = analysisResult;
+    const { diagrams: generalDiagramMap, sequenceDiagrams: specificSequenceDiagrams, callFlows: rawCallFlows } = analysisResult;
 
     console.log('[CallFlowPage] Extracted generalDiagramMap:', generalDiagramMap);
     console.log('[CallFlowPage] Extracted specificSequenceDiagrams:', specificSequenceDiagrams);
+    console.log('[CallFlowPage] Extracted rawCallFlows:', rawCallFlows);
 
     if (generalDiagramMap) {
       Object.entries(generalDiagramMap).forEach(([type, url]) => {
@@ -53,7 +54,8 @@ const CallFlowPage = ({ analysisResult, repoName }) => {
           title: title,
           originalTitle: `Sequence: ${fqn}`,
           url: `${BACKEND_STATIC_BASE_URL}${url}`,
-          type: 'SEQUENCE_DIAGRAM'
+          type: 'IMAGE',
+          rawFlow: rawCallFlows && rawCallFlows[fqn] ? rawCallFlows[fqn] : []
         });
       });
     }
@@ -95,6 +97,18 @@ const CallFlowPage = ({ analysisResult, repoName }) => {
               </ListItem>
               <Paper elevation={1} sx={{ p: 2, mb: 2, borderRadius: 2, border: '1px solid #eee' }}>
                 <DiagramViewer diagram={diag} />
+                {diag.rawFlow && diag.rawFlow.length > 0 && (
+                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed #ccc' }}>
+                    <Typography variant="subtitle2" sx={{ fontFamily: 'Quicksand', fontWeight: 'bold', mb:1 }}>Raw Call Steps:</Typography>
+                    <List dense sx={{ maxHeight: 200, overflow: 'auto', background: '#f9f9f9', borderRadius: 1, p:1}}>
+                      {diag.rawFlow.map((step, stepIndex) => (
+                        <ListItem key={`${diag.key}-step-${stepIndex}`} sx={{py: 0.2}}>
+                          <ListItemText primary={`${stepIndex + 1}. ${step}`} primaryTypographyProps={{fontFamily: 'monospace', fontSize: '0.8rem'}} />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </Box>
+                )}
               </Paper>
               {index < displayableDiagrams.length - 1 && <Divider sx={{ my: 2 }} />}
             </React.Fragment>

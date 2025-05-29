@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Chip, Button, CircularProgress } from '@mui/material';
-import DownloadIcon from '@mui/icons-material/Download';
+import React from 'react';
+import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Chip } from '@mui/material';
 
 const methodColor = (method) => {
   switch (method) {

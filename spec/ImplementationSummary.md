@@ -6,249 +6,132 @@ This document summarizes the current state of the CodeDocGen project, covering b
 
 *   **Goal:** To analyze Java-based applications from public Git repositories, generate documentation, visualizations (diagrams), and provide insights into the codebase.
 *   **Tech Stack:**
-    *   **Backend:** Java 21, Spring Boot 3.2.x (Maven), JGit, JavaParser, PlantUML, CommonMark, SpringDoc OpenAPI.
-    *   **Frontend:** React (Create React App), Material UI, Axios, react-zoom-pan-pinch, swagger-ui-react, tailwindcss-animate, react-router-dom.
+    *   **Backend:** Java 21, Spring Boot 3.2.x (Maven), JGit, JavaParser (with JavaSymbolSolver), PlantUML, CommonMark, SpringDoc OpenAPI.
+    *   **Frontend:** React (Create React App), Material UI (with potential Tailwind/shadcn elements), Axios, react-zoom-pan-pinch, swagger-ui-react, react-router-dom.
 *   **Core Workflow:**
     1.  User provides a public Git repository URL via the frontend.
     2.  Frontend sends the URL to the backend's `/api/analysis/analyze` endpoint.
-    3.  Backend clones the repository, extracts the project name from the URL, performs analysis (project type detection, code parsing with improved type classification, endpoint extraction, class diagram generation, documentation creation), and returns a structured `ParsedDataResponse` with server-relative paths for diagrams.
-    4.  Frontend displays the received information in a user-friendly tabbed interface, correctly loading served diagrams.
+    3.  Backend clones the repository, extracts project name, performs deep analysis (project type detection, Spring Boot versioning, **advanced Java parsing with symbol resolution**, class/method metadata extraction, **call flow tracing**, **DAO/DB analysis**, endpoint extraction, generation of multiple diagram types), and returns a structured `ParsedDataResponse`.
+    4.  Frontend displays the received information in a user-friendly sidebar-navigated interface, correctly loading served diagrams and detailed analysis results.
 
 ## 2. Backend Details (`codedocgen-backend`)
 
 ### 2.1. Main Application & Configuration
 
-*   **`CodeDocGenApplication.java`:** Main Spring Boot application class (`@SpringBootApplication`).
-*   **`pom.xml`:** Manages dependencies, including:
-    *   `spring-boot-starter-web`, `spring-boot-starter-actuator`
-    *   `springdoc-openapi-starter-webmvc-ui` (for OpenAPI/Swagger UI)
-    *   `org.eclipse.jgit` (for Git operations)
-    *   `com.github.javaparser` (core and symbol-solver for Java code analysis)
-    *   `net.sourceforge.plantuml` (for diagram generation)
-    *   `org.commonmark` (for Markdown to HTML conversion)
-    *   `org.yaml:snakeyaml` (for YAML parsing, if needed directly)
-    *   `commons-io` (for file utilities)
-    *   `org.projectlombok` (for boilerplate code reduction)
-*   **`application.yml`:** Configures:
-    *   Server port (`8080`).
-    *   Application name.
-    *   Logging levels.
-    *   `app.repoStoragePath`: Temporary directory for cloning repositories (e.g., `/tmp/codedocgen_repos`).
-    *   `app.outputBasePath`: Base directory for generated outputs like diagrams and docs (e.g., `/tmp/codedocgen_output`), served via `/generated-output/`.
-*   **`config/WebConfig.java`:** Configures CORS and a static resource handler for serving files from `app.outputBasePath` under the `/generated-output/**` URL pattern.
+*   **`CodeDocGenApplication.java`:** Main Spring Boot application class.
+*   **`pom.xml`:** Manages dependencies, including `com.github.javaparser:javaparser-symbol-solver`.
+*   **`application.yml`:** Configures server port, application name, logging levels (including specific `TRACE` levels for parser components like `com.codedocgen.parser.ClassMetadataVisitorLogger`), and configurable paths for `repoStoragePath`, `outputBasePath`, `docsStoragePath`, `diagramsStoragePath`.
+*   **`config/WebConfig.java`:** Configures CORS and static resource serving for `/generated-output/**`.
 
 ### 2.2. DTOs (Data Transfer Objects) - `com.codedocgen.dto`
 
-*   **`RepoRequest.java`:**
-    *   `repoUrl` (String): The Git repository URL provided by the user.
-*   **`ParsedDataResponse.java`:** The main DTO returned by the analysis endpoint.
-    *   `projectName` (String): Extracted from the Git repository URL.
-    *   `projectType` (String): e.g., "Maven", "Gradle".
-    *   `springBootVersion` (String): If applicable.
-    *   `isSpringBootProject` (boolean)
-    *   `classes` (List<ClassMetadata>): List of all parsed classes.
-    *   `endpoints` (List<EndpointMetadata>): List of extracted API endpoints.
-    *   `diagrams` (Map<DiagramType, String>): Map of diagram types to their server-relative image URLs (e.g., `/generated-output/docs_id/diagrams/class_diagram.svg`). Includes `CLASS_DIAGRAM` and `SEQUENCE_DIAGRAM`.
-    *   `projectSummary` (String): A textual summary of the project.
-    *   `openApiSpec` (String): OpenAPI/Swagger spec content or a message indicating its availability.
-    *   `featureFiles` (List<String>): Contents of found Gherkin feature files.
-    *   `wsdlFilesContent` (Map<String, String>): Content of found WSDL files, keyed by path.
-    *   `xsdFilesContent` (Map<String, String>): Content of found XSD files, keyed by path.
-    *   `sequenceDiagrams` (List<String>): PlantUML strings for sequence diagrams (alternative to diagramMap).
+*   **`RepoRequest.java`:** `repoUrl` (String).
+*   **`ParsedDataResponse.java`:** Main response DTO.
+    *   `projectName`, `projectType`, `springBootVersion`, `springBootProject` (boolean, serialized from `isSpringBootProject`).
+    *   `classes` (List<ClassMetadata>): All parsed classes.
+    *   `endpoints` (List<EndpointMetadata>): Extracted API endpoints.
+    *   `diagrams` (Map<String, String>): Map of diagram types (as String keys, e.g., "CLASS_DIAGRAM", "SEQUENCE_DIAGRAM_fqn.method") to server-relative SVG URLs.
+    *   `projectSummary` (String): Textual project summary.
+    *   `openApiSpec` (String): OpenAPI spec content.
+    *   `featureFiles` (List<String>): Gherkin feature file contents.
+    *   `wsdlFilesContent` (Map<String, String>): WSDL file contents.
+    *   `xsdFilesContent` (Map<String, String>): XSD file contents.
+    *   `callFlows` (Map<String, List<String>>): Raw call flow steps for each entry point (FQN key).
+    *   `daoOperations` (Map<String, List<DaoOperationDetail>>): DAO operations grouped by class FQN.
+    *   `dbDiagramPath` (String): Server-relative path to the database schema diagram.
+*   **`MavenExecutionResult.java`:** For results of `mvn` commands (classpath, compile status).
 
 ### 2.3. Models - `com.codedocgen.model`
 
-*   **`ClassMetadata.java`:** Detailed information about a parsed Java class/interface/enum.
-    *   `name`, `packageName`, `type` (controller, service, entity, etc.), `annotations`, `methods` (List<MethodMetadata>), `fields`, `parentClass`, `interfaces`, `filePath`.
-*   **`MethodMetadata.java`:** Detailed information about a parsed method.
-    *   `name`, `returnType`, `parameters`, `annotations`, `exceptionsThrown`, `visibility`, `isStatic`, `isAbstract`, `calledMethods` (List<String> - TODO), `externalCalls` (Map<String, String> - TODO).
-*   **`EndpointMetadata.java`:** Information about an API endpoint.
-    *   `path`, `httpMethod`, `handlerMethod` (fully qualified), `requestBodyType`, `responseBodyType`, `pathVariables`, `requestParameters`, `consumes`, `produces`, `type` ("REST" or "SOAP"), `wsdlUrl`, `operationName`.
-*   **`DiagramType.java` (enum):** Types of diagrams that can be generated (e.g., `CLASS_DIAGRAM`, `SEQUENCE_DIAGRAM`).
+*   **`ClassMetadata.java`:** Name, packageName, type, annotations, methods, fields (List<FieldMetadata>), parentClass, interfaces, filePath, etc.
+*   **`MethodMetadata.java`:** Name, returnType, parameters (List<String> `type name`), annotations, exceptions, visibility, static, abstract, `calledMethods` (List<String> - fully resolved or descriptive unresolved FQNs), `parameterAnnotations`, `daoOperations` (List<DaoOperationDetail>), `sqlQueries`, `sqlTables`, `sqlOperations`.
+*   **`FieldMetadata.java`:** Name, type, annotations, visibility, static, final, `initializer` (String).
+*   **`EndpointMetadata.java`:** Path, httpMethod, handlerMethod, requestBodyType, responseBodyType, etc.
+*   **`DiagramType.java` (enum):** `CLASS_DIAGRAM`, `SEQUENCE_DIAGRAM`, `COMPONENT_DIAGRAM`, `USECASE_DIAGRAM`, `DATABASE_DIAGRAM`, `ENTITY_RELATIONSHIP_DIAGRAM`.
+*   **`DaoOperationDetail.java`:** Details for a single DAO operation (method name, return type, parameters, SQL query, tables, operation type).
 
 ### 2.4. Services - `com.codedocgen.service` & `com.codedocgen.service.impl`
 
-*   **`GitService` / `GitServiceImpl`:**
-    *   Clones a Git repository using JGit to a specified local path.
-    *   Deletes the cloned repository directory.
-*   **`ProjectDetectorService` / `ProjectDetectorServiceImpl`:**
-    *   Detects the build tool (Maven, Gradle) by checking for `pom.xml` or `build.gradle` files.
-    *   Detects if a project is a Spring Boot project by checking build files for Spring Boot dependencies/plugins and by scanning for `@SpringBootApplication` annotation.
-    *   Attempts to detect the Spring Boot version from `pom.xml` (parent or property).
+*   **`GitService` / `GitServiceImpl`:** Clones and cleans Git repos.
+*   **`ProjectDetectorService` / `ProjectDetectorServiceImpl`:** Detects build tool, Spring Boot presence, and version.
 *   **`JavaParserService` / `JavaParserServiceImpl`:**
-    *   Walks through the project directory to find all `.java` files.
-    *   Uses JavaParser to parse each Java file.
-    *   A `ClassMetadataVisitor` extracts information about classes, interfaces, enums, methods (including visibility, static/abstract modifiers, parameters, return type, annotations, exceptions), and fields.
-    *   Determines class type (controller, service, repository, entity, config, test, etc.) based on annotations (prioritizing stereotype annotations like `@Repository` even for interfaces) and naming conventions.
-    *   **Symbol Resolution Enhancement**: To improve accuracy, especially for projects with generated code (e.g., JAXB from XSDs), this service now attempts to execute `mvn compile -DskipTests -q` on the target project *before* parsing. This makes generated sources available to the JavaParser symbol solver.
-*   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:**
-    *   Iterates through `ClassMetadata` identified as "controller".
-    *   Extracts REST endpoint information from method annotations (e.g., `@GetMapping`, `@PostMapping`, `@RequestMapping`), including HTTP method and path.
-    *   Sets default `consumes`/`produces` to `application/json`.
-    *   Includes TODOs for more robust parsing (path variables, request/response bodies) and SOAP endpoint extraction.
+    *   Core parsing engine using JavaParser and **JavaSymbolSolver**.
+    *   Initializes symbol solver with project sources, dependencies (via `mvn dependency:build-classpath`), and compiled classes (`target/classes` after running `mvn compile`).
+    *   `ClassMetadataVisitor` extracts detailed class, method, and field metadata.
+    *   Uses FQNs and provides descriptive fallbacks for unresolved method calls (e.g., `UNRESOLVED_CALL: com.example.MyClass.myMethod(params)`).
+    *   Determines class types accurately (controller, service, repository, entity, model, etc.).
+*   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:** Extracts REST endpoint info.
 *   **`DiagramService` / `DiagramServiceImpl`:**
-    *   Generates class diagrams and sequence diagrams using PlantUML.
-    *   Constructs PlantUML source string from `ClassMetadata` (for class diagrams) or `CallFlows` (for sequence diagrams).
-    *   Renders diagrams as SVG images to the specified output directory, returning absolute paths.
-    *   **Enhanced Component Diagram Generation:**
-        *   Improved detection of components in legacy/SOAP applications by checking:
-            *   Class name patterns (e.g., *Endpoint, *ServiceImpl, *Service)
-            *   Annotations (@WebService, @Endpoint, @SOAPBinding)
-            *   Spring stereotypes (@Component, @Service, @Repository, @Controller, etc.)
-        *   Determines component roles (controller, service, repository, endpoint, webservice, etc.) through a dedicated algorithm
-        *   Groups components by package for hierarchical organization
-        *   Adds descriptive relationships between components ("delegates to", "uses", "implements")
-        *   Adds WSDL interfaces to represent web service contracts
-        *   Applies stereotypes (<<endpoint>>, <<service>>, etc.) for visual categorization
-        *   Uses simplified display names for better readability
-    *   **Improved Usecase Diagram Generation:**
-        *   Expanded controller detection to include SOAP endpoints through annotation and naming pattern checks
-        *   Added second-level service methods as connected usecases (via "includes" relationships)
-        *   Implemented External System actor for SOAP clients
-        *   Added database actor and operations for repository interactions
-        *   Uses icons to differentiate between usecases:
-            *   SOAP operations (gear icon)
-            *   Service methods (layers icon)
-            *   Database operations (database icon)
-        *   Intelligently connects usecases to appropriate actors (User or External System)
-        *   Shows multi-tier architecture with proper abstraction levels
-        *   Analyzes method call chains to establish relationships between controller methods and service methods
-*   **`DocumentationService` / `DocumentationServiceImpl`:**
-    *   `generateProjectSummary()`: Creates a textual summary based on `ParsedDataResponse`, now reflecting more accurate repository counts due to improved class typing.
-    *   `findAndReadFeatureFiles()`: Searches for `.feature` files in common directories (e.g., `src/test/resources/features`) and reads their content.
-    *   `findAndReadWsdlFiles()`: Searches for `.wsdl` files in common resource directories and reads their content into `wsdlFilesContent` map.
-    *   `findAndReadXsdFiles()`: Searches for `.xsd` files in common resource directories (often alongside WSDLs) and reads their content into `xsdFilesContent` map.
-    *   `generateMarkdownDocumentation()`: Creates a comprehensive Markdown document from `ParsedDataResponse`, including project overview, summary, class details, endpoint details, links/embedded diagrams, OpenAPI spec, and feature files.
-    *   `generateHtmlDocumentation()`: Converts the generated Markdown to a basic HTML document using the `org.commonmark` library.
+    *   Generates Class, Component, Usecase, Sequence, ERD, and DB Schema diagrams as SVGs using PlantUML.
+    *   `generateSequenceDiagram`: Uses raw call flows from `CallFlowAnalyzer` and cleans participant names/labels.
+    *   Enhanced Component and Usecase diagram generation for better insights into SOAP/legacy systems and multi-tier architectures.
+*   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries, finds feature/WSDL/XSD files, creates Markdown/HTML docs.
+*   **`DaoAnalysisService` / `DaoAnalysisServiceImpl`:**
+    *   Analyzes repository interfaces and classes identified by `JavaParserServiceImpl`.
+    *   Uses `DaoAnalyzer` helper to detect SQL queries and table names from method bodies.
+    *   Infers operations from Spring Data method names and extracted SQL.
+    *   Provides data for the DB schema diagram and DAO operation listings.
 
-### 2.5. Controller - `com.codedocgen.controller`
+### 2.5. Parsers - `com.codedocgen.parser`
 
-*   **`AnalysisController.java`:**
-    *   Handles API requests at `/api/analysis`.
-    *   `@PostMapping("/analyze")`:
-        *   Accepts `RepoRequest` (containing `repoUrl`).
-        *   Extracts `projectName` from `repoUrl`.
-        *   Creates unique temporary directories for cloning and output.
-        *   Orchestrates the analysis by calling the various services in sequence:
-            1.  `GitService` to clone.
-            2.  `ProjectDetectorService` to get project type/Spring Boot info.
-            3.  `JavaParserService` to parse all Java files.
-            4.  `EndpointExtractorService` to extract endpoints.
-            5.  `DiagramService` to generate diagrams (Class Diagrams, Sequence Diagrams from call flows). Converts absolute diagram paths to server-relative URLs (e.g., `/generated-output/...`) before setting them in `ParsedDataResponse`.
-            6.  `DocumentationService` to find feature files, WSDL files, and XSD files.
-            7.  Sets `openApiSpec` message (points to Spring Boot auto-generated endpoints or indicates TODO for others). SpringDoc auto-configuration is relied upon for Swagger UI at `/swagger-ui.html` and API docs at `/v3/api-docs`.
-            8.  `DocumentationService` to generate project summary.
-        *   Returns `ResponseEntity<ParsedDataResponse>` with all collected data.
-        *   Cleans up the cloned repository in a `finally` block.
+*   **`CallFlowAnalyzer.java`:** Performs DFS on method metadata (from `JavaParserServiceImpl`) to trace and build detailed call flow sequences for entry points.
+*   **`DaoAnalyzer.java`:** Utility class for `DaoAnalysisServiceImpl` to find SQL queries and table names in method bodies.
+*   **`SoapWsdlParser.java`**, **`YamlParser.java`**: Existing parsers.
+
+### 2.6. Controller - `com.codedocgen.controller`
+
+*   **`AnalysisController.java`:** Orchestrates the entire analysis workflow by calling services in sequence. Populates and returns `ParsedDataResponse` including all analysis results, diagram paths, call flows, and DAO operations.
 
 ## 3. Frontend Details (`codedocgen-frontend`)
 
 ### 3.1. Project Setup & Key Libraries
 
-*   **Create React App** based project.
-*   **`package.json`:** Manages dependencies and scripts.
-    *   `react`, `react-dom`, `react-scripts`
-    *   `@mui/material`, `@mui/icons-material`, `@emotion/react`, `@emotion/styled` (for Material UI)
-    *   `axios` (for API calls)
-    *   `react-zoom-pan-pinch` (for diagram interactivity)
-    *   `swagger-ui-react` (for displaying OpenAPI specs)
-    *   `tailwindcss-animate`, `react-router-dom` (recent additions for UI and routing)
-    *   `prop-types` (for component prop validation)
-*   **Scripts:** `npm start`, `npm run build`, `npm test`.
-*   **Styling:** Material UI's theming and `CssBaseline`. Basic global styles in `src/index.css`. Some Create React App files might have been converted to `.tsx` for TypeScript usage.
-*   **Key fixes**: Resolved issues with missing `tailwindcss-animate`, `react-router-dom`, `@types/react-dom`. Corrected undefined `logger` in `App.js` (using `console.error`) and undefined `API_URL` in `AnalysisDisplay.js` (passed as prop).
+*   Create React App based, using Material UI, Axios, `react-router-dom`, `swagger-ui-react`, `react-zoom-pan-pinch`.
+*   Environment variables in `.env` for `REACT_APP_API_URL` and `REACT_APP_BACKEND_STATIC_URL`.
 
-### 3.2. Core Components - `src/components`
+### 3.2. Core Components & Pages - `src/`
 
-*   **`App.js` (in `src/`):**
-    *   Main application component.
-    *   Sets up Material UI `ThemeProvider` and `CssBaseline`.
-    *   Manages state for `analysisResult`, `isLoading`, `error`, and `activeSection` (for sidebar navigation).
-    *   Includes an `AppBar` with the application title and a `Sidebar` component.
-    *   Conditionally renders different page components (`OverviewPage`, `ApiSpecsPage`, `CallFlowPage`, `ClassesPage`, `DiagramsPage`, `GherkinPage`) based on `activeSection`.
-    *   `handleAnalyze` function: makes POST request to backend `/api/analysis/analyze` using `axios`.
-    *   Handles loading state and displays errors using MUI `Snackbar` and `Alert`.
-*   **`RepoForm.js`:**
-    *   A simple form with a `TextField` for the Git repository URL and a `Button` to trigger analysis.
-    *   Disabled during loading.
-*   **`AnalysisDisplay.js`:**
-    *   Displays the `analysisResult` from the backend. Previously tabbed, now section-based via `App.js` and `Sidebar.js`.
-    *   Receives `API_URL` as a prop.
-*   **`Sidebar.js`:**
-    *   Provides main navigation using MUI `List` and `ListItem` components.
-    *   Allows switching between sections: Overview, API Specs, Call Flow, Classes, Diagrams, Gherkin Features.
-*   **`OverviewPage.js`:**
-    *   Displays `data.projectSummary`, project type, and Spring Boot version.
-*   **`ClassesPage.js`:**
-    *   Lists all classes using MUI `Accordion`. Each class accordion expands to show package name, class name, type (as a `Chip`), file path, parent class, implemented interfaces, annotations, fields, and methods (with visibility, static/abstract, return type, name, parameters, method-specific annotations, exceptions).
-*   **`ApiSpecsPage.js`:**
-    *   **OpenAPI/Swagger Display:** If `data.openApiSpec` is present and parsable as JSON/YAML, it renders the spec using `<SwaggerUI spec={specObject} />`. Provides links to backend auto-generated endpoints if applicable. Handles errors in spec string format.
-    *   **WSDL/XSD Display:** If `data.wsdlFilesContent` is present, it uses the first WSDL. It parses WSDL operations, messages, and parts. Crucially, it uses `data.xsdFilesContent` to look up and parse imported XSD schemas (matching by `schemaLocation` or namespace). It then recursively traverses XSD elements and complex types to display detailed attributes, child elements, types, and cardinalities in a structured list format. Provides a fallback to show raw WSDL/XSD content.
-*   **`CallFlowPage.js`:**
-    *   Receives `analysisResult` and `repoName`.
-    *   Extracts sequence diagrams from `analysisResult.diagramMap` (type `SEQUENCE_DIAGRAM`) or `analysisResult.sequenceDiagrams` (PlantUML strings).
-    *   Uses `DiagramViewer.js` to display these diagrams.
-*   **`DiagramsPage.js`:**
-    *   Displays other diagrams (e.g., Class Diagrams) from `data.diagramMap` using `DiagramViewer.js`.
-*   **`GherkinPage.js`:**
-    *   Displays the content of Gherkin `.feature` files from `data.featureFiles`. Shows "No Gherkin feature files found" if none are present.
-*   **`DiagramViewer.js`:**
-    *   A reusable component to display SVG diagrams (from URL or direct SVG string) with zoom/pan capabilities (`react-zoom-pan-pinch`).
+*   **`App.js`:** Main component, manages state (`analysisResult`, `isLoading`, etc.), routing, and renders page components via `Sidebar` navigation.
+*   **`Sidebar.js`:** Main navigation for Overview, API Specs, Call Flow, Classes, Diagrams, Database, Gherkin.
+*   **`OverviewPage.js`:** Project summary, Spring Boot status/version.
+*   **`ClassesPage.js`:** Detailed view of parsed classes and their members.
+*   **`ApiSpecsPage.js`:** Displays OpenAPI specs via SwaggerUI and detailed WSDL/XSD structures.
+*   **`CallFlowPage.js`:** Displays sequence diagrams (via `DiagramViewer.js`) and associated raw call steps for each identified call flow.
+*   **`DiagramsPage.js`:** Displays general diagrams (Class, Component, Usecase, ERD) via `DiagramViewer.js`.
+*   **`DatabasePage.js`:** Displays the Database Schema diagram, lists detected entities, and DAO operations.
+*   **`GherkinPage.js`:** Shows Gherkin feature file content.
+*   **`DiagramViewer.js`:** Reusable component for rendering SVG diagrams with zoom/pan.
+*   **`services/api.js`:** Axios service for backend communication.
+*   **`constants/uiConstants.js`:** For `BACKEND_STATIC_BASE_URL`.
 
-### 3.3. Entry Point & HTML
+## 4. Functionality Achieved (Key Highlights)
 
-*   **`src/index.js`:** React app entry point, renders `<App />` into the 'root' div.
-*   **`public/index.html`:** Basic HTML shell, includes link for Roboto font (used by Material UI).
-
-### 3.4. Environment Configuration
-
-*   `API_URL` in `App.js` defaults to `http://localhost:8080/api`.
-*   A `README.md` instructs users on optionally creating a `.env` file to override `REACT_APP_API_URL`.
-
-## 4. Functionality Achieved (Iterations 1-10, plus recent fixes)
-
-*   **Repo Input & Cloning:** UI form for Git URL, backend clones via JGit. Project name correctly extracted from URL.
-*   **Project Detection:** Backend identifies Maven/Gradle, Spring Boot, and SB version.
-*   **Code Parsing:** Comprehensive parsing of Java classes, methods, fields, annotations, inheritance. Improved accuracy in classifying class types (e.g., repository interfaces).
-*   **Endpoint Extraction:** Basic REST endpoint details extracted from Spring annotations.
-*   **Diagram Generation & Display:** PlantUML class diagrams and sequence diagrams generated as SVGs. Backend serves these, and frontend displays them with interactivity via `DiagramViewer.js`.
-*   **Documentation & Summaries:** Project summary, Gherkin feature files, and raw WSDL/XSD are available.
-*   **OpenAPI/Swagger:** Displayed via SwaggerUI component for valid specs; links for auto-generated specs.
-*   **WSDL/XSD Display**: Rich, structured view of WSDL operations and XSD elements/attributes.
-*   **Call Flow Display**: Sequence diagrams for analyzed call flows are displayed.
-*   **UI Display:** Frontend presents all gathered information in a structured, sidebar-navigated interface using Material UI.
+*   **Deep Java Analysis:** Robust parsing of Java code using symbol resolution (JavaSymbolSolver) for accurate FQN-based method call tracing, type determination, and metadata extraction.
+*   **Comprehensive Call Flow Analysis:** Generation of detailed sequence diagrams and raw call steps, with clear labeling of resolved and unresolved calls (including JDK/framework calls).
+*   **Database & DAO Insights:** Detection of entities, DAO/repository operations (Spring Data & basic SQL), and generation of a database schema diagram.
+*   **Multiple Diagram Types:** Class, Sequence, Component, Usecase, ERD, and Database Schema diagrams generated as SVGs.
+*   **Accurate Spring Boot Detection:** Reliable identification of Spring Boot projects and versions.
+*   **User-Friendly Frontend:** Clear presentation of all analysis results via a sidebar-navigated interface, with interactive diagram viewers.
+*   **Detailed API Specification Display:** OpenAPI via SwaggerUI and rich, parsed WSDL/XSD views.
 
 ## 5. Build Status
 
-*   Backend (`codedocgen-backend`): Should compile successfully with Maven (`mvn clean install`) after the recent fixes (missing `StandardCharsets` import and deletion of old `RepoController.java`).
-*   Frontend (`codedocgen-frontend`): Should run with `npm start` and build with `npm run build` after recent dependency installations and fixes. Source map warnings from third-party libraries may still appear but are generally non-critical.
+*   Backend and Frontend should build and run successfully following the extensive debugging and refinement.
 
 ## 6. Known Limitations & TODOs (High-Level)
 
-*   **Call Flow Analysis:** Implemented with sequence diagram generation. Accuracy significantly improved, though complex dynamic behaviors or highly abstract code might still pose challenges for static analysis.
-*   **SOAP Support:** Significantly enhanced. WSDLs are parsed, and referenced XSDs are processed to display detailed operation contracts including element attributes and types.
 *   **Advanced Parsing:**
-    *   More robust extraction of REST endpoint details (request/response bodies, path/query parameters) is still an area for improvement.
-    *   ✅ Parsing of legacy DAO/JDBC patterns is now implemented, with database operation extraction and table relationship visualization.
-    *   YAML file parsing for configuration or OpenAPI specs within the repo.
-*   **Diagrams:**
-    *   ✅ Entity Relationship (ER) diagrams have been implemented with proper JPA entity annotation detection.
-    *   ✅ Component diagrams with enhanced visualization for SOAP/legacy systems have been implemented.
-    *   ✅ Usecase diagrams showing system capabilities with connections to actors (User, External System, Database) have been implemented.
-    *   ✅ Database schema diagrams showing database tables and relationships extracted from DAO/Repository classes have been implemented.
-    *   Class and Sequence diagrams are fully implemented and functional.
-*   **Gherkin Feature Files:**
-    *   Implement AI-assisted generation of Gherkin feature files from code analysis (future scope).
+    *   Further refinement of REST endpoint detail extraction (complex request/response bodies).
+    *   Deeper YAML parsing if used for project configuration beyond basic Spring Boot.
+*   **Diagrams & Visualization:**
+    *   More interactive call flow visualization beyond static sequence diagrams.
 *   **Frontend Enhancements:**
-    *   More sophisticated UI for large datasets (pagination, filtering, searching).
-    *   Interactive call flow visualization.
-    *   Improved error handling and user feedback.
+    *   UI/UX improvements for very large datasets (advanced filtering, searching, pagination).
     *   Dark mode.
 *   **Backend Enhancements:**
-    *   Configuration for private repositories (authentication).
-    *   More robust error handling and recovery.
-    *   ✅ Database interaction analysis for DAO/JDBC code has been implemented.
-*   **Export/Publishing:** Confluence publishing and PDF/HTML downloads (Iteration 11) are not yet started.
+    *   Configuration for private Git repositories.
+    *   Performance optimizations for extremely large codebases.
+*   **Export Features:** Confluence publishing, PDF/HTML downloads remain future scope.
 
 ## Recent Updates (May 2025)
 - Diagrams are now generated and served as SVG for best quality and Confluence publishing.

@@ -38,7 +38,7 @@ function App() {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [aboutOpen, setAboutOpen] = useState(false); // Assuming this is for a modal, not directly related to API calls
+  // const [aboutOpen, setAboutOpen] = useState(false); // Assuming this is for a modal, not directly related to API calls
   const [activeSection, setActiveSection] = useState('Home'); // Changed initial to 'Home'
   const [repoName, setRepoName] = useState('');
   const [endpoints, setEndpoints] = useState([]);
@@ -96,8 +96,9 @@ function App() {
   const handleCloseSnackbar = () => setError(null);
 
   const handleNav = (item) => {
-    if (item.label === 'About') setAboutOpen(true);
-    else setActiveSection(item.label);
+    // if (item.label === 'About') setAboutOpen(true);
+    // else setActiveSection(item.label);
+    setActiveSection(item.label); // Simplified for now
   };
 
   // Log diagramMap before rendering DiagramsPage
@@ -123,7 +124,7 @@ function App() {
             {activeSection === 'All Classes' && <AllClassesPage entities={entities} repoName={repoName} />}
             {activeSection === 'Diagrams' && 
               (console.log('[App.js] Actually rendering DiagramsPage with diagramMap:', JSON.stringify(diagramMap)), 
-              <DiagramsPage diagramMap={diagramMap} sequenceDiagrams={analysisResult?.sequenceDiagrams} repoName={repoName} />)}
+              <DiagramsPage diagramMap={diagramMap} sequenceDiagrams={analysisResult?.sequenceDiagrams} rawCallFlows={analysisResult?.callFlows} repoName={repoName} />)}
             {activeSection === 'Publish' && <PublishPage repoName={repoName} analysisResult={analysisResult}/>} {/* PublishPage might need full analysisResult*/}
           </Box>
           <Box sx={{ textAlign: 'center', color: '#aaa', fontSize: 14, mb: 2, mt: 'auto' }}>

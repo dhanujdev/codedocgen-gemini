@@ -218,7 +218,7 @@ public class AnalysisController {
                     if (!daoOperations.isEmpty()) {
                         try {
                             logger.info("Generating database schema diagram");
-                            String dbDiagramAbsPath = daoAnalysisService.generateDbDiagram(daoOperations, diagramsSubDir.getAbsolutePath());
+                            String dbDiagramAbsPath = daoAnalysisService.generateDbDiagram(classMetadataList, daoOperations, diagramsSubDir.getAbsolutePath());
                             if (dbDiagramAbsPath != null) {
                                 String pathPrefixToTrim = new File(outputBasePath).getAbsolutePath();
                                 String relativePath = dbDiagramAbsPath.replace(pathPrefixToTrim, "").replace("\\", "/");

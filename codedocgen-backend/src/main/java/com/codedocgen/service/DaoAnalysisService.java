@@ -22,9 +22,10 @@ public interface DaoAnalysisService {
     
     /**
      * Generate diagram showing database tables and their relationships
+     * @param allClassMetadata List of all class metadata
      * @param daoOperations The map of class FQN to DAO operations
      * @param outputPath The path to save the diagram
      * @return The path to the generated diagram
      */
-    String generateDbDiagram(Map<String, List<DaoOperationDetail>> daoOperations, String outputPath);
+    String generateDbDiagram(List<ClassMetadata> allClassMetadata, Map<String, List<DaoOperationDetail>> daoOperations, String outputPath);
 } 

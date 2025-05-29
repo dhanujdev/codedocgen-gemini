@@ -25,10 +25,11 @@ public class DaoAnalyzer {
     // Regex to capture table names. This is a simplified version and might need enhancements for complex scenarios.
     // Handles: FROM table, FROM schema.table, JOIN table, JOIN schema.table
     // Also: UPDATE table, UPDATE schema.table, INTO table, INTO schema.table
-    // Ignores tables in subqueries for simplicity for now.
+    // And DELETE FROM table
+    // Improved to better handle aliases and clean names.
     private static final Pattern TABLE_PATTERN = Pattern.compile(
-            "\\b(?:FROM|JOIN|UPDATE|INTO)\\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)?)",
-            Pattern.CASE_INSENSITIVE
+        "\\b(?:FROM|JOIN|UPDATE|INTO)\\s+([`\\w$.]+(?:\\s+AS\\s+[`\\w$]+)?)|DELETE\\s+FROM\\s+([`\\w$.]+)",
+        Pattern.CASE_INSENSITIVE
     );
 
     public DaoAnalysisResult analyze(MethodDeclaration methodDeclaration) {
@@ -81,10 +82,12 @@ public class DaoAnalyzer {
         }
         String lower = s.trim().toLowerCase();
         // Basic check for SQL keywords, can be expanded
-        return lower.startsWith("select ") || lower.startsWith("insert ") ||
-               lower.startsWith("update ") || lower.startsWith("delete ") ||
-               lower.startsWith("with ") || lower.startsWith("create ") ||
-               lower.startsWith("alter ") || lower.startsWith("drop ");
+        // Ensure it's not just a comment or log message containing these words.
+        // Check for common query structures.
+        return (lower.startsWith("select ") && lower.contains(" from ")) ||
+               (lower.startsWith("insert into ") && lower.contains(" values ")) ||
+               (lower.startsWith("update ") && lower.contains(" set ")) ||
+               (lower.startsWith("delete from ") && lower.contains(" where ")); // `where` is common but not strictly necessary for delete all
     }
 
     private DaoOperationDetail.SqlOperationType extractSqlOperationType(String sql) {
@@ -100,9 +103,37 @@ public class DaoAnalyzer {
         Set<String> tables = new HashSet<>(); // Use Set to avoid duplicate table names from the same query
         Matcher m = TABLE_PATTERN.matcher(sql);
         while (m.find()) {
-            tables.add(m.group(1));
+            String tableName = null;
+            if (m.group(1) != null) { // FROM, JOIN, UPDATE, INTO clauses
+                tableName = m.group(1).trim();
+            } else if (m.group(2) != null) { // DELETE FROM clause
+                 tableName = m.group(2).trim();
+            }
+
+            if (tableName != null) {
+                // Remove potential alias (e.g., "table_name AS t" -> "table_name")
+                tableName = tableName.split("\\s+AS\\s+")[0].replace("`", "");
+                // Remove schema prefix if present
+                if (tableName.contains(".")) {
+                    tableName = tableName.substring(tableName.lastIndexOf('.') + 1);
+                }
+                tables.add(tableName);
+            }
         }
-        return tables.stream().distinct().collect(Collectors.toList()); // Return distinct list
+        // If no tables found by complex regex, try a simpler one for basic names
+        // This is for cases like "SELECT * FROM mytable" where 'mytable' might not be caught if regex is too strict
+        // or for Spring Data generated queries that only list the table name.
+        if (tables.isEmpty()) {
+            // Look for any word that could be a table name if it's preceded by typical keywords.
+            // This is a heuristic and might need adjustment.
+            Pattern simpleTablePattern = Pattern.compile("\\b(?:FROM|JOIN|UPDATE|INTO|TABLE)\\s+([a-zA-Z_][\\w]*)\\b", Pattern.CASE_INSENSITIVE);
+            Matcher simpleMatcher = simpleTablePattern.matcher(sql);
+            while (simpleMatcher.find()) {
+                tables.add(simpleMatcher.group(1));
+            }
+        }
+
+        return tables.stream().distinct().collect(Collectors.toList());
     }
 
     public static class DaoAnalysisResult {

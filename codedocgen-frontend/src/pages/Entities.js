@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Tabs, Tab, List, ListItem, ListItemText, CircularProgress, Button } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Typography, Paper, Table, TableHead, TableRow, TableCell, TableBody, Tabs, Tab, List, ListItem, ListItemText } from '@mui/material';
 
 // Updated helper to check for entity annotation (case-insensitive for the core "Entity" part)
 const isJpaEntity = (entity) => {

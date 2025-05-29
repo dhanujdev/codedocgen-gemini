@@ -16,12 +16,13 @@ module.exports = override(
     if (babelLoaderRule) {
       const babelLoader = babelLoaderRule.oneOf.find(oneOfRule => String(oneOfRule.loader).includes('babel-loader'));
       if (babelLoader && babelLoader.include) {
-        // Add exclusions for autolinker and react-zoom-pan-pinch
+        // Add exclusions for autolinker, react-zoom-pan-pinch, and mermaid
         // This assumes these modules are in node_modules and should not be processed by Babel
         const newExclude = [
           ...(babelLoader.exclude || []), // Keep existing excludes if any
           path.resolve('node_modules/autolinker'),
           path.resolve('node_modules/react-zoom-pan-pinch'),
+          path.resolve('node_modules/mermaid'),
         ];
         babelLoader.exclude = newExclude;
 

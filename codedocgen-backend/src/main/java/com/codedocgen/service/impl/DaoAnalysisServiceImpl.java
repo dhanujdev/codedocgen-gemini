@@ -21,6 +21,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class DaoAnalysisServiceImpl implements DaoAnalysisService {
@@ -122,10 +124,45 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
                     logger.debug("Generated synthetic operations for Spring Data repository {}", fullyQualifiedName);
                 }
                 
-                if (!operations.isEmpty()) {
-                    result.put(fullyQualifiedName, operations);
+                // Merge operations: prioritize source-found, then add heuristic/Spring Data if not covered
+                List<DaoOperationDetail> finalOperations = new ArrayList<>();
+                if (operations != null && !operations.isEmpty()) {
+                    finalOperations.addAll(operations);
+                }
+
+                // Add operations from Spring Data interface methods if it's a Spring Data repo
+                if (isSpringDataRepository(classMetadata)) {
+                    List<DaoOperationDetail> springDataOps = generateSpringDataRepositoryOperations(classMetadata);
+                    Set<String> existingMethodNamesInFinal = finalOperations.stream()
+                                                                    .map(DaoOperationDetail::getMethodName)
+                                                                    .filter(Objects::nonNull)
+                                                                    .collect(Collectors.toSet());
+                    for (DaoOperationDetail springOp : springDataOps) {
+                        if (!existingMethodNamesInFinal.contains(springOp.getMethodName())) {
+                            finalOperations.add(springOp);
+                        }
+                    }
+                    logger.debug("Processed Spring Data synthetic operations for {}. Total ops now: {}", fullyQualifiedName, finalOperations.size());
+                }
+                
+                // Add operations from other method metadata if not already covered by source or Spring Data
+                if (classMetadata.getMethods() != null) {
+                    List<DaoOperationDetail> metadataBasedOps = analyzeFromMethodMetadata(classMetadata);
+                    Set<String> existingMethodNamesInFinal = finalOperations.stream()
+                                                                    .map(DaoOperationDetail::getMethodName)
+                                                                    .filter(Objects::nonNull)
+                                                                    .collect(Collectors.toSet());
+                    for (DaoOperationDetail metaOp : metadataBasedOps) {
+                        if (!existingMethodNamesInFinal.contains(metaOp.getMethodName())) {
+                            finalOperations.add(metaOp);
+                        }
+                    }
+                }
+
+                if (!finalOperations.isEmpty()) {
+                    result.put(fullyQualifiedName, finalOperations);
                     processedCount++;
-                    logger.debug("Found {} database operations in {}", operations.size(), fullyQualifiedName);
+                    logger.debug("Found {} database operations in {}", finalOperations.size(), fullyQualifiedName);
                 }
             } catch (Exception e) {
                 logger.warn("Error analyzing DAO class {}: {}", fullyQualifiedName, e.getMessage());
@@ -416,103 +453,167 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
     }
 
     @Override
-    public String generateDbDiagram(Map<String, List<DaoOperationDetail>> daoOperations, String outputPath) {
+    public String generateDbDiagram(List<ClassMetadata> allClassMetadata, Map<String, List<DaoOperationDetail>> daoOperations, String outputPath) {
         StringBuilder plantUmlBuilder = new StringBuilder();
         plantUmlBuilder.append("@startuml Database Schema\n");
         plantUmlBuilder.append("!theme plain\n");
+        plantUmlBuilder.append("hide empty members\n");
         plantUmlBuilder.append("skinparam linetype ortho\n");
-        
-        // Extract all tables
-        Set<String> allTables = new HashSet<>();
-        for (List<DaoOperationDetail> operations : daoOperations.values()) {
-            for (DaoOperationDetail op : operations) {
-                if (op.getTables() != null) {
-                    allTables.addAll(op.getTables());
+        plantUmlBuilder.append("skinparam classAttributeIconSize 0\n");
+        plantUmlBuilder.append("skinparam defaultTextAlignment center\n");
+        plantUmlBuilder.append("skinparam roundcorner 10\n");
+        plantUmlBuilder.append("skinparam shadowing false\n");
+
+        plantUmlBuilder.append("skinparam class {\n");
+        plantUmlBuilder.append("  BackgroundColor PaleGreen\n");
+        plantUmlBuilder.append("  ArrowColor SeaGreen\n");
+        plantUmlBuilder.append("  BorderColor SeaGreen\n");
+        plantUmlBuilder.append("}\n");
+
+        plantUmlBuilder.append("skinparam entity {\n");
+        plantUmlBuilder.append("  BackgroundColor LightYellow\n");
+        plantUmlBuilder.append("  ArrowColor Orange\n");
+        plantUmlBuilder.append("  BorderColor Orange\n");
+        plantUmlBuilder.append("}\n\n");
+
+        Map<String, String> entityToSafeName = new HashMap<>();
+        Map<String, ClassMetadata> entityClassMap = new HashMap<>();
+
+        // Process @Entity classes first
+        if (allClassMetadata != null) {
+            for (ClassMetadata cm : allClassMetadata) {
+                if (cm == null || cm.getName() == null) continue;
+                boolean isEntity = "entity".equalsIgnoreCase(cm.getType()) || 
+                                 (cm.getAnnotations() != null && cm.getAnnotations().stream().anyMatch(a -> a.contains("@Entity")));
+
+                if (isEntity) {
+                    String entityName = cm.getName();
+                    String safeEntityName = "entity_" + entityName.replaceAll("[^a-zA-Z0-9_]", "_");
+                    entityToSafeName.put(entityName, safeEntityName);
+                    entityClassMap.put(entityName, cm);
+
+                    plantUmlBuilder.append("entity \"").append(entityName).append("\" as ").append(safeEntityName).append(" {\n");
+                    boolean hasId = false;
+                    if (cm.getFields() != null) {
+                        for (com.codedocgen.model.FieldMetadata fm : cm.getFields()) {
+                            if (fm == null || fm.getName() == null) continue;
+                            String fieldName = fm.getName();
+                            String fieldType = fm.getType() != null ? fm.getType().substring(fm.getType().lastIndexOf('.') + 1) : "Object";
+                            String pkMarker = "";
+                            if (fm.getAnnotations() != null && fm.getAnnotations().stream().anyMatch(a -> a.contains("@Id"))) {
+                                pkMarker = " <<PK>>";
+                                hasId = true;
+                            }
+                            // Basic field display - enhance with FK detection later
+                            plantUmlBuilder.append("  +").append(fieldName).append(" : ").append(fieldType).append(pkMarker).append("\n");
+                        }
+                    }
+                    if (!hasId) { // Add a default ID if no @Id was found, common for simple entities
+                        plantUmlBuilder.append("  +id : long <<PK>>\n");
+                    }
+                    plantUmlBuilder.append("}\n\n");
                 }
             }
         }
-        
-        // Extract relationships (this is a heuristic based on common naming patterns)
-        Map<String, Set<String>> relationships = new HashMap<>();
-        
-        // Generate entities - using 'entity_' prefix to avoid naming collisions
-        for (String table : allTables) {
-            String safeTableName = "entity_" + table.replaceAll("[^a-zA-Z0-9_]", "_");
-            plantUmlBuilder.append("entity \"").append(table).append("\" as ").append(safeTableName).append(" {\n");
-            plantUmlBuilder.append("  +id : number <<PK>>\n");
-            
-            // Add placeholder fields, ideally these would be extracted from actual code
-            if (table.contains("_")) {
-                String[] parts = table.split("_");
-                for (String part : parts) {
-                    if (!part.isEmpty()) {
-                        // Check if it's a potential foreign key to another entity
-                        if (allTables.contains(part)) {
-                            plantUmlBuilder.append("  +").append(part).append("_id : number <<FK>>\n");
-                            
-                            // Add to relationships
-                            relationships.computeIfAbsent(table, k -> new HashSet<>()).add(part);
+
+        // Add relationships based on JPA annotations (OneToMany, ManyToOne, etc.) - Simplified for now
+        if (allClassMetadata != null) {
+            for (ClassMetadata cm : allClassMetadata) {
+                if (cm == null || !entityClassMap.containsKey(cm.getName()) || cm.getFields() == null) continue;
+                
+                String sourceEntityName = cm.getName();
+                String safeSourceEntityName = entityToSafeName.get(sourceEntityName);
+                if (safeSourceEntityName == null) continue;
+
+                for (com.codedocgen.model.FieldMetadata fm : cm.getFields()) {
+                    if (fm == null || fm.getAnnotations() == null || fm.getType() == null) continue;
+
+                    String fieldSimpleType = fm.getType().substring(fm.getType().lastIndexOf('.') + 1);
+                    // Clean generic types like List<TargetEntity> -> TargetEntity
+                    String targetEntityName = fieldSimpleType.replaceAll(".*<", "").replace(">", "");
+
+                    if (entityClassMap.containsKey(targetEntityName)) {
+                        String safeTargetEntityName = entityToSafeName.get(targetEntityName);
+                        if (safeTargetEntityName == null) continue;
+
+                        boolean isCollection = fieldSimpleType.startsWith("List") || fieldSimpleType.startsWith("Set") || fieldSimpleType.startsWith("Collection");
+
+                        if (fm.getAnnotations().stream().anyMatch(a -> a.contains("@OneToMany"))) {
+                            plantUmlBuilder.append(safeSourceEntityName).append(" ||--o{ ").append(safeTargetEntityName).append(" : ").append(fm.getName()).append("\n");
+                        } else if (fm.getAnnotations().stream().anyMatch(a -> a.contains("@ManyToOne"))) {
+                            plantUmlBuilder.append(safeSourceEntityName).append(" }o--|| ").append(safeTargetEntityName).append(" : ").append(fm.getName()).append("\n");
+                        } else if (fm.getAnnotations().stream().anyMatch(a -> a.contains("@OneToOne"))) {
+                            plantUmlBuilder.append(safeSourceEntityName).append(" ||--|| ").append(safeTargetEntityName).append(" : ").append(fm.getName()).append("\n");
+                        } else if (fm.getAnnotations().stream().anyMatch(a -> a.contains("@ManyToMany"))) {
+                            // For ManyToMany, a join table is implied but not explicitly drawn here without more info
+                            plantUmlBuilder.append(safeSourceEntityName).append(" }o--o{ ").append(safeTargetEntityName).append(" : ").append(fm.getName()).append(" (ManyToMany)\n");
+                        } else if (isCollection) {
+                            // Default for collections if no specific annotation, assume OneToMany like
+                             plantUmlBuilder.append(safeSourceEntityName).append(" .. ").append(safeTargetEntityName).append(" : ").append(fm.getName()).append(" (collection)\n");
+                        } else {
+                            // Default for single field reference, assume ManyToOne like or simple association
+                            // plantUmlBuilder.append(safeSourceEntityName).append(" ..> ").append(safeTargetEntityName).append(" : ").append(fm.getName()).append("\n");
                         }
                     }
                 }
-            }
-            
-            plantUmlBuilder.append("}\n\n");
-        }
-        
-        // Add relationships - using safe identifiers
-        for (Map.Entry<String, Set<String>> entry : relationships.entrySet()) {
-            String table = entry.getKey();
-            String safeTable = "entity_" + table.replaceAll("[^a-zA-Z0-9_]", "_");
-            
-            for (String relatedTable : entry.getValue()) {
-                String safeRelatedTable = "entity_" + relatedTable.replaceAll("[^a-zA-Z0-9_]", "_");
-                plantUmlBuilder.append(safeTable).append(" }o--|| ").append(safeRelatedTable).append("\n");
+                plantUmlBuilder.append("\n");
             }
         }
-        
-        // Add DAO classes that interact with tables
-        for (Map.Entry<String, List<DaoOperationDetail>> entry : daoOperations.entrySet()) {
-            String daoClass = entry.getKey();
-            String simpleName = daoClass.contains(".") ? daoClass.substring(daoClass.lastIndexOf('.') + 1) : daoClass;
-            String safeClassName = "class_" + simpleName.replaceAll("[^a-zA-Z0-9_]", "_");
-            
-            plantUmlBuilder.append("class \"").append(simpleName).append("\" as ").append(safeClassName).append(" <<DAO>> {\n");
-            
-            // Group operations by table
-            Map<String, Set<DaoOperationDetail.SqlOperationType>> tableOps = new HashMap<>();
-            for (DaoOperationDetail op : entry.getValue()) {
-                if (op.getTables() != null) {
-                    for (String table : op.getTables()) {
-                        tableOps.computeIfAbsent(table, k -> new HashSet<>()).add(op.getOperationType());
+
+        // Add DAO classes and link them to ENTITY names (not table names directly from DAO ops anymore)
+        if (daoOperations != null) {
+            for (Map.Entry<String, List<DaoOperationDetail>> entry : daoOperations.entrySet()) {
+                String daoClassFQN = entry.getKey();
+                if (daoClassFQN == null) continue;
+
+                String simpleName = daoClassFQN.contains(".") ? daoClassFQN.substring(daoClassFQN.lastIndexOf('.') + 1) : daoClassFQN;
+                String safeDaoClassName = "dao_" + simpleName.replaceAll("[^a-zA-Z0-9_]", "_");
+
+                plantUmlBuilder.append("class \"").append(simpleName).append("\" as ").append(safeDaoClassName).append(" <<DAO>> {\n");
+                Set<String> methodsInDao = new HashSet<>();
+                if (entry.getValue() != null) {
+                    for (DaoOperationDetail op : entry.getValue()) {
+                        if (op == null) continue;
+                        String methodName = op.getMethodName() != null ? op.getMethodName() : inferMethodNameFromOperation(op);
+                        if (methodName != null && !methodName.trim().isEmpty() && methodsInDao.add(methodName)) {
+                             plantUmlBuilder.append("  +").append(methodName).append("()\n");
+                        }
                     }
                 }
-            }
-            
-            // List operations in the DAO class
-            for (Map.Entry<String, Set<DaoOperationDetail.SqlOperationType>> tableEntry : tableOps.entrySet()) {
-                String table = tableEntry.getKey();
-                Set<DaoOperationDetail.SqlOperationType> ops = tableEntry.getValue();
+                plantUmlBuilder.append("}\n\n");
                 
-                for (DaoOperationDetail.SqlOperationType opType : ops) {
-                    String methodName = "";
-                    switch (opType) {
-                        case SELECT: methodName = "find" + snakeToCamel(table, true); break;
-                        case INSERT: methodName = "save" + snakeToCamel(table, true); break;
-                        case UPDATE: methodName = "update" + snakeToCamel(table, true); break;
-                        case DELETE: methodName = "delete" + snakeToCamel(table, true); break;
-                        default: methodName = "operate" + snakeToCamel(table, true);
+                // Connect DAO to entities it operates on
+                // This requires guessing the entity from the table name in DaoOperationDetail for now
+                Set<String> operatedEntityNames = new HashSet<>();
+                if (entry.getValue() != null) {
+                    for (DaoOperationDetail op : entry.getValue()) {
+                        if (op != null && op.getTables() != null) {
+                            for (String tableNameFromDaoOp : op.getTables()) {
+                                // Try to map table name back to an entity name
+                                String entityNameGuess = snakeToCamel(tableNameFromDaoOp, true);
+                                if (entityClassMap.containsKey(entityNameGuess)) {
+                                    operatedEntityNames.add(entityNameGuess);
+                                } else {
+                                    // If direct guess fails, check if any known entity produces this table name
+                                    for(String knownEntityName : entityClassMap.keySet()){
+                                        if(tableNameFromDaoOp.equalsIgnoreCase(camelToSnake(knownEntityName))){
+                                            operatedEntityNames.add(knownEntityName);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    plantUmlBuilder.append("  +").append(methodName).append("()\n");
                 }
-            }
-            
-            plantUmlBuilder.append("}\n\n");
-            
-            // Connect DAO to its tables - using safe identifiers
-            for (String table : tableOps.keySet()) {
-                String safeTable = "entity_" + table.replaceAll("[^a-zA-Z0-9_]", "_");
-                plantUmlBuilder.append(safeClassName).append(" ..> ").append(safeTable).append(" : operates on\n");
+
+                for (String entityName : operatedEntityNames) {
+                    String safeEntityName = entityToSafeName.get(entityName);
+                    if (safeEntityName != null) {
+                        plantUmlBuilder.append(safeDaoClassName).append(" ..> ").append(safeEntityName).append(" : operates on\n");
+                    }
+                }
+                plantUmlBuilder.append("\n");
             }
         }
         
@@ -525,6 +626,22 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
         } catch (Exception e) {
             logger.error("Error generating database diagram: {}", e.getMessage());
             return null;
+        }
+    }
+
+    private String inferMethodNameFromOperation(DaoOperationDetail op) {
+        if (op == null || op.getOperationType() == null || op.getTables() == null || op.getTables().isEmpty()) {
+            return "unknownOperation";
+        }
+        String firstTable = op.getTables().get(0); // Use first table for naming
+        String entityName = snakeToCamel(firstTable, true);
+
+        switch (op.getOperationType()) {
+            case SELECT: return "find" + entityName + "s"; // Pluralize for find
+            case INSERT: return "save" + entityName;
+            case UPDATE: return "update" + entityName;
+            case DELETE: return "delete" + entityName;
+            default: return "access" + entityName;
         }
     }
     
@@ -569,52 +686,80 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
     // Generate synthetic operations for Spring Data repositories
     private List<DaoOperationDetail> generateSpringDataRepositoryOperations(ClassMetadata classMetadata) {
         List<DaoOperationDetail> operations = new ArrayList<>();
-        
-        // Extract entity name from class name
-        String repositoryName = classMetadata.getName();
-        String entityName = repositoryName;
-        if (repositoryName.endsWith("Repository")) {
-            entityName = repositoryName.substring(0, repositoryName.length() - "Repository".length());
-        } else if (repositoryName.endsWith("DAO") || repositoryName.endsWith("Dao")) {
-            entityName = repositoryName.substring(0, repositoryName.length() - "DAO".length());
+        String entityName = extractEntityNameFromRepo(classMetadata);
+        if (entityName == null) {
+            logger.warn("Could not determine entity name for Spring Data repository: {}. Skipping synthetic query generation.", classMetadata.getName());
+            return operations;
         }
-        
-        // Generate table name from entity name
-        String tableName = camelToSnake(entityName);
-        
-        // Add common Spring Data operations
-        // Find by ID
-        operations.add(new DaoOperationDetail(
-            "findById", 
-            "SELECT * FROM " + tableName + " WHERE id = ?",
-            DaoOperationDetail.SqlOperationType.SELECT,
-            tableName
-        ));
-        
-        // Find all
-        operations.add(new DaoOperationDetail(
-            "findAll", 
-            "SELECT * FROM " + tableName,
-            DaoOperationDetail.SqlOperationType.SELECT,
-            tableName
-        ));
-        
-        // Save
-        operations.add(new DaoOperationDetail(
-            "save", 
-            "INSERT INTO " + tableName + " VALUES (...) ON DUPLICATE KEY UPDATE ...",
-            DaoOperationDetail.SqlOperationType.INSERT,
-            tableName
-        ));
-        
-        // Delete by ID
-        operations.add(new DaoOperationDetail(
-            "deleteById", 
-            "DELETE FROM " + tableName + " WHERE id = ?",
-            DaoOperationDetail.SqlOperationType.DELETE,
-            tableName
-        ));
-        
+
+        if (classMetadata.getMethods() != null) {
+            for (MethodMetadata method : classMetadata.getMethods()) {
+                DaoOperationDetail.SqlOperationType opType = inferOperationTypeFromMethodName(method.getName());
+                if (opType != DaoOperationDetail.SqlOperationType.UNKNOWN) {
+                    // For Spring Data, the "table" is the entity name.
+                    // The actual SQL might be more complex (e.g., involving joins based on method name conventions),
+                    // but for a basic representation, the primary entity is key.
+                    String syntheticQuery = createSyntheticQuery(opType, entityName, method.getName());
+                    List<String> tablesInvolved = new ArrayList<>();
+                    tablesInvolved.add(entityName); // Primary table
+                    // Attempt to find other mentioned entities in method name (e.g. findBy<Entity>And<OtherEntity>)
+                    // This is a heuristic
+                    Pattern entityPattern = Pattern.compile("([A-Z][a-z]+)+");
+                    Matcher matcher = entityPattern.matcher(method.getName());
+                    while(matcher.find()) {
+                        String potentialEntity = matcher.group();
+                        if (!potentialEntity.equals(entityName) && Character.isUpperCase(potentialEntity.charAt(0))) { // Check if it looks like a class name
+                            // We'd ideally check if this is a known entity from allClassMetadata
+                            // For now, just add if it's different from the main entity
+                            tablesInvolved.add(potentialEntity);
+                        }
+                    }
+
+                    operations.add(new DaoOperationDetail(method.getName(), syntheticQuery, opType, tablesInvolved.stream().distinct().collect(Collectors.toList())));
+                }
+            }
+        }
         return operations;
+    }
+
+    private String extractEntityNameFromRepo(ClassMetadata repoClass) {
+        // Try to get from generic type arguments of CrudRepository, JpaRepository, etc.
+        List<String> interfaces = repoClass.getInterfaces();
+        if (interfaces != null) {
+            for (String iface : interfaces) {
+                if (iface.contains("Repository") || iface.contains("Dao")) {
+                    // Examples: CrudRepository<Customer, Long>, JpaRepository<Account, String>
+                    Pattern pattern = Pattern.compile("[<,]\\s*([\\w.]+)\\s*[,>]?"); // Capture first type argument
+                    Matcher matcher = pattern.matcher(iface);
+                    if (matcher.find() && matcher.groupCount() >= 1) {
+                        String fullEntityName = matcher.group(1);
+                        return fullEntityName.substring(fullEntityName.lastIndexOf('.') + 1); // Simple name
+                    }
+                }
+            }
+        }
+        // Fallback: if the repository name follows a convention like XyzRepository, assume Xyz is the entity.
+        if (repoClass.getName().endsWith("Repository")) {
+            return repoClass.getName().substring(0, repoClass.getName().length() - "Repository".length());
+        }
+        if (repoClass.getName().endsWith("Dao")) {
+            return repoClass.getName().substring(0, repoClass.getName().length() - "Dao".length());
+        }
+        return null;
+    }
+
+    private String createSyntheticQuery(DaoOperationDetail.SqlOperationType opType, String tableName, String methodName) {
+        switch (opType) {
+            case SELECT:
+                return String.format("SELECT * FROM %s (based on method: %s)", tableName, methodName);
+            case INSERT:
+                return String.format("INSERT INTO %s (...) VALUES (...) (based on method: %s)", tableName, methodName);
+            case UPDATE:
+                return String.format("UPDATE %s SET ... WHERE ... (based on method: %s)", tableName, methodName);
+            case DELETE:
+                return String.format("DELETE FROM %s WHERE ... (based on method: %s)", tableName, methodName);
+            default:
+                return String.format("Custom operation on %s (based on method: %s)", tableName, methodName);
+        }
     }
 } 
