@@ -114,7 +114,7 @@ function App() {
       <Box sx={{ display: 'flex', minHeight: '100vh', fontFamily: 'Quicksand, Inter, Roboto, Arial, sans-serif', bgcolor: '#f8fafc' }}>
         <Sidebar activeSection={activeSection} setActiveSection={setActiveSection} onNav={handleNav} />
         <Box sx={{ flex: 1, p: 0, display: 'flex', flexDirection: 'column', minHeight: '100vh', alignItems: 'center', background: '#f8fafc' }}>
-          <Box sx={{ width: '100%', maxWidth: 1200, p: 4, pt: 3, pb: 6, background: '#fff', borderRadius: 3, boxShadow: 2, mt: 4, mb: 4, minHeight: 600 }}>
+          <Box sx={{ width: '100%', p: 4, pt: 3, pb: 6, background: '#fff', borderRadius: 3, boxShadow: 2, mt: 4, mb: 4, minHeight: 600 }}>
             {activeSection === 'Home' && <HomePage onAnalyze={handleAnalyze} isLoading={isLoading} error={error} onCloseError={handleCloseSnackbar} />}
             {activeSection === 'Overview' && <OverviewPage analysisResult={analysisResult} repoName={repoName} />}
             {activeSection === 'Endpoints' && <EndpointsPage endpoints={analysisResult?.endpoints} repoName={repoName}/>} {/* Pass from analysisResult */}

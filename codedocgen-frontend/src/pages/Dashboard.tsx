@@ -1,4 +1,7 @@
 import React from 'react';
+import Container from '@mui/material/Container';
+import Typography from '@mui/material/Typography';
+import Box from '@mui/material/Box'; // Often useful for structuring content
 
 // Placeholders for components that will be part of the dashboard
 // import EndpointTable from '../components/EndpointTable';
@@ -26,23 +29,35 @@ const DashboardPage: React.FC = () => {
   //   }
   // }, []);
 
-  // if (loading) return <p>Loading dashboard...</p>;
-  // if (error) return <p>Error: {error}</p>;
-  // if (!data) return <p>No data to display.</p>; 
+  // if (loading) return <Typography>Loading dashboard...</Typography>; // Use Typography for consistency
+  // if (error) return <Typography color="error">Error: {error}</Typography>; // Use Typography for consistency
+  // if (!data) return <Typography>No data to display.</Typography>;  // Use Typography for consistency
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">Project Dashboard</h1>
-      {/* Implement Tabbed Interface here (using shadcn/ui Tabs) */}
-      {/* Overview Tab */}
-      {/* Endpoints Tab (REST + SOAP) - <EndpointTable data={data.endpoints} /> */}
-      {/* Features/Call Flow Tab - <FlowExplorer data={data.callFlows} /> */}
-      {/* Diagrams Tab (Class/Entity) - <DiagramViewer diagrams={data.diagrams} /> */}
-      {/* Database View Tab */}
-      {/* Export Tab */}
-      <p>Dashboard content will go here. (Overview, Endpoints, Diagrams, etc.)</p>
-      {/* <pre>{JSON.stringify(data, null, 2)}</pre> */}
-    </div>
+    <Container maxWidth={false} sx={{ mt: 4, mb: 4 }}> {/* Changed maxWidth to false */}
+      <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', mb: 3 }}> {/* Replaces text-2xl font-bold mb-6 */}
+        Project Dashboard
+      </Typography>
+      {/* Implement Tabbed Interface here (using MUI Tabs) */}
+      {/* Example for MUI Tabs (can be extracted to a new component later) */}
+      {/* 
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+        <Tabs value={value} onChange={handleChange} aria-label="dashboard tabs">
+          <Tab label="Overview" />
+          <Tab label="Endpoints" />
+          <Tab label="Features" />
+        </Tabs>
+      </Box>
+      {value === 0 && <Box sx={{ p: 3 }}>Overview Content</Box>}
+      {value === 1 && <Box sx={{ p: 3 }}>Endpoints Content</Box>}
+      {value === 2 && <Box sx={{ p: 3 }}>Features Content</Box>}
+      */}
+
+      <Typography variant="body1">
+        Dashboard content will go here. (Overview, Endpoints, Diagrams, etc.)
+      </Typography>
+      {/* <Box component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(data, null, 2)}</Box> */}
+    </Container>
   );
 };
 

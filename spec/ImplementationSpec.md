@@ -2,14 +2,14 @@
 ...
 // Cursor Spec File for CodeDocGen
 // This spec should be input to Cursor AI to scaffold the full-stack application.
-// Java 21 (Spring Boot - Maven) Backend + React + Material UI Frontend (Note: Earlier drafts might have mentioned Tailwind, current setup is primarily Material UI with some potential Tailwind/shadcn components based on package.json)
+// Java 21 (Spring Boot - Maven) Backend + React + Material UI (Primary) Frontend
 
 /*
 ====================================
 📘 HIGH-LEVEL STRUCTURE
 ====================================
 Backend: Java 21 + Spring Boot (Maven)
-Frontend: React + Material UI (with potential Tailwind CSS + shadcn/ui elements)
+Frontend: React + Material UI (Primary)
 */
 
 /*
@@ -38,14 +38,18 @@ codedocgen-backend/
 │   │   │   ├── EndpointExtractorServiceImpl.java
 │   │   │   ├── DiagramServiceImpl.java      // Generates class, sequence, component, usecase, ERD, DB schema diagrams (SVG)
 │   │   │   ├── DocumentationServiceImpl.java // Generates project summaries, reads WSDL/XSD, Gherkin.
-│   │   │   └── DaoAnalysisServiceImpl.java   // Implements DaoAnalysisService, returns DbAnalysisResult
+│   │   │   ├── DaoAnalysisServiceImpl.java   // Implements DaoAnalysisService, returns DbAnalysisResult
+│   │   │   ├── LoggerInsightsServiceImpl.java // Analyzes logs for PII/PCI, patterns loaded from application.yml
+│   │   │   └── YamlParserServiceImpl.java   // New: Basic YAML file parsing service
 │   │   ├── GitService.java
 │   │   ├── ProjectDetectorService.java
 │   │   ├── JavaParserService.java
 │   │   ├── EndpointExtractorService.java
 │   │   ├── DiagramService.java
 │   │   ├── DocumentationService.java
-│   │   └── DaoAnalysisService.java       // Interface method analyzeDbOperations returns DbAnalysisResult
+│   │   ├── DaoAnalysisService.java       // Interface method analyzeDbOperations returns DbAnalysisResult
+│   │   ├── LoggerInsightsService.java    // Interface for logger analysis
+│   │   └── YamlParserService.java        // New: Interface for YAML parsing
 │   ├── parser/
 │   │   ├── CallFlowAnalyzer.java      // Performs DFS to build call flows from method metadata.
 │   │   ├── SoapWsdlParser.java        // (Existing, may need updates for XSD deep parsing integration if not already done)
@@ -82,9 +86,9 @@ codedocgen-frontend/
 │   │   ├── RepoForm.js
 │   │   ├── AnalysisDisplay.js      // Main display, uses Sidebar for navigation.
 │   │   ├── Sidebar.js              // Main navigation component.
-│   │   ├── EndpointTable.js        // (from .tsx)
-│   │   ├── DiagramViewer.tsx        // Note: .tsx extension
-│   │   ├── FeatureFileList.js      // (from .tsx)
+│   │   ├── EndpointTable.js
+│   │   ├── DiagramViewer.js        // Changed from .tsx
+│   │   ├── FeatureFileList.js
 │   │   └── ProgressIndicator.js    // Shows loading state during analysis
 │   ├── pages/
 │   │   ├── OverviewPage.js         // Displays project summary, Spring Boot info.
@@ -93,11 +97,12 @@ codedocgen-frontend/
 │   │   ├── DiagramsPage.js         // General diagrams page (class, component, usecase, ERD).
 │   │   ├── DatabasePage.js         // Updated to use DbAnalysisResult for entity-centric view & detailed ops
 │   │   ├── GherkinPage.js
-│   │   └── ClassesPage.js
+│   │   ├── ClassesPage.js
+│   │   └── LoggerInsightsPage.js   // Page for displaying logger insights with new features
 │   ├── services/
-│   │   └── api.js                  // (from .ts) Axios API service for backend communication.
-│   ├── App.js                    // Main app component, handles routing, analysis results state.
-│   ├── index.js
+│   │   └── api.js
+│   ├── App.js                    // Main app component, handles overall layout (sidebar + content), routing, analysis results state.
+│   ├── index.js                  // Main entry point, renders App.js
 │   ├── index.css
 │   ├── constants/
 │   │   └── uiConstants.js        // For things like BACKEND_STATIC_BASE_URL
@@ -124,6 +129,45 @@ codedocgen-frontend/
 9. Iteration 9: Generate Swagger/OpenAPI + project summary. - ✅ DONE
 10. Iteration 10: Build full UI with sidebar navigation. - ✅ DONE (Database page updated for new DbAnalysisResult structure)
 11. Iteration 11: Export to Confluence + PDF/HTML - (Future Enhancement)
+12. Iteration 12: Logger Insights Feature
+    *   **Backend API**: The existing `/api/analysis/analyze` endpoint's `ParsedDataResponse` now includes `logStatements` (List<LogStatement>). The `LogStatement` and `LogVariable` models have been updated:
+        ```java
+        // com.codedocgen.model.LogVariable
+        public class LogVariable {
+            private String name;
+            private String type;
+            private boolean isPii; // Changed from isSensitive
+            private boolean isPci; // Added
+            // ...getters/setters...
+        }
+
+        // com.codedocgen.model.LogStatement
+        public class LogStatement {
+            private String id;
+            private String className;
+            private int line;
+            private String level;
+            private String message;
+            private List<LogVariable> variables;
+            private boolean isPiiRisk; // Changed from isPIIRisk
+            private boolean isPciRisk; // Added
+            // ...getters/setters...
+        }
+        ```
+    *   **Backend Logic (`LoggerInsightsServiceImpl.java`)**:
+        *   Uses separate, comprehensive `Pattern` objects for PII-specific keywords and PCI-specific keywords, including common abbreviations and variations (e.g., `ssn`, `cardnbr`, `cvv`, `firstnm`, `addr`).
+        *   A third pattern for general sensitive terms (e.g., `password`, `token`) flags both PII and PCI risks for those terms.
+        *   **The regex strings for these patterns are now loaded from `application.yml` via `@Value` annotations, allowing for configuration without recompiling.**
+        *   Populates `isPii`, `isPci` in `LogVariable` and `isPiiRisk`, `isPciRisk` in `LogStatement` accordingly.
+    *   **Frontend Route**: `/logger-insights` (No change - handled by activeSection in App.js)
+    *   **Frontend Components (`LoggerInsightsPage.js`)**:
+        *   Displays logs in a collapsible table format (each row can be expanded).
+        *   Includes "Expand All" and "Collapse All" buttons to manage the expanded state of all log rows.
+        *   Provides a search input for class/message.
+        *   Features an MUI `Select` dropdown to filter logs by `level` (e.g., INFO, WARN, ERROR), populated dynamically from available log levels.
+        *   Includes `Switch` toggles for PII and PCI risk filtering.
+    *   **Sidebar**: "Logger Insights" tab in `Sidebar.js` navigates to this section.
+    *   **PDF Export**: Implement PDF export functionality using `jsPDF` or `html2pdf`.
 
 /*
 ====================================
@@ -172,6 +216,8 @@ codedocgen-frontend/
     *   Information displayed in UI and used in summaries.
 
 6.  **Frontend Enhancements:**
+    *   **UI Framework**: Standardized on Material UI (Primary) for a consistent look and feel and responsive design.
+    *   **Responsiveness**: Addressed layout issues to ensure the main content area correctly utilizes available screen width, particularly on wide screens or when zoomed out.
     *   **Call Flow Page (`CallFlowPage.js`):**
         *   Displays sequence diagrams and raw call steps.
         *   Integrates `FlowExplorer.tsx` for expandable/collapsible detailed flow steps.
@@ -189,8 +235,10 @@ codedocgen-frontend/
     *   `ProjectDetectorServiceImpl.java`: Add similar logic for `build.gradle`/`build.gradle.kts` if necessary for Spring Boot version detection (L120) - ✅ DONE (Regex corrected for Java string literals).
     *   `DocumentationServiceImpl.java`: (Method summaries) Add called methods / external calls if data is available (L108) - ✅ DONE; (Project summary) Enhance with common libraries, tech stack details (L279) - ✅ DONE (enhanced with available data, further improvements may require build file access).
     *   `DaoAnalyzer.java`: Handle cases where SQL is in a variable or constructed dynamically (L50) - ☑️ PARTIALLY ADDRESSED (basic variable tracking implemented; complex dynamic SQL remains a challenge).
+    *   **`LoggerInsightsServiceImpl.java`**: PII/PCI keyword patterns externalized to `application.yml` - ✅ DONE.
+    *   **Deeper YAML Parsing**: Added `YamlParserService` and `YamlParserServiceImpl` for basic YAML file parsing to `Map<String, Object>`. Further integration depends on specific use cases for YAML in target projects - ✅ NEWLY ADDED.
 *   **Frontend:**
-    *   `FlowExplorer.tsx`: Add more details or a way to expand/explore the flow (L24) - ✅ DONE (implemented basic expand/collapse for flow steps).
+    *   `FlowExplorer.tsx`: Add more details or a way to expand/explore the flow (L24) - ✅ DONE (implemented basic expand/collapse for flow steps, though this file might be .js or integrated if not a separate .tsx now)
     *   `ApiSpecsPage.js`: (WSDL/XSD rendering) Future enhancement - if `typeAttr` refers to a global `complexType`, expand it (L247) - 📝 ACKNOWLEDGED & DETAILED (complex, for future iteration; detailed comment in code outlines steps).
     *   `CallFlowPage.js`: Ensure display names for flows/diagrams are user-friendly and correctly parsed from signatures - ✅ DONE (Implemented `generateFlowDisplayName` with robust parsing).
 
@@ -223,87 +271,11 @@ codedocgen-frontend/
 *   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:** Extracts REST and SOAP (e.g. `@WebMethod`) endpoint info.
 *   **`DiagramService` / `DiagramServiceImpl`:** Generates Class, Component, Usecase, Sequence, ERD, and DB Schema diagrams as SVGs.
 *   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries (including called methods, external calls, and tech stack details from available data), finds feature/WSDL/XSD files.
-*   **`DaoAnalysisService` / `DaoAnalysisServiceImpl`:**
+*   **`DaoAnalysisService` / `DaoAnalysisServiceImpl`:** // Implements DaoAnalysisService, returns DbAnalysisResult
+*   **`LoggerInsightsService` / `LoggerInsightsServiceImpl`:** // Analyzes logs for PII/PCI, patterns loaded from application.yml
+*   **`YamlParserService` / `YamlParserServiceImpl`:** // New: Basic YAML file parsing service
 
 ### 2.5. Parsers - `com.codedocgen.parser`
 
 *   **`CallFlowAnalyzer.java`:** Builds detailed call flow sequences.
-*   **`DaoAnalyzer.java`:** Utility class for `DaoAnalysisServiceImpl` to find SQL queries and table names (includes basic support for SQL in string variables).
-*   **`SoapWsdlParser.java`**, **`YamlParser.java`**: Existing parsers.
-
-## 3. Frontend Details (`codedocgen-frontend`)
-
-*   **`Sidebar.js`:** Main navigation.
-*   **`OverviewPage.js`:** Project summary.
-*   **`ClassesPage.js`:** Detailed view of parsed classes.
-*   **`ApiSpecsPage.js`:** Displays OpenAPI specs and detailed WSDL/XSD structures.
-*   **`CallFlowPage.js`:**
-    *   Displays sequence diagrams and raw call steps.
-    *   Integrates `FlowExplorer.tsx` for interactive exploration of flow steps.
-    *   **Features a `generateFlowDisplayName` helper function to parse full Java method signatures (including parameters with types and names) and generate human-readable titles for diagrams and flow details.**
-*   **`DiagramsPage.js`:** Displays general diagrams.
-*   **`DatabasePage.js`:**
-
-## 4. Functionality Achieved (Key Highlights)
-
-*   **Deep Java Analysis:** Robust parsing with symbol resolution.
-*   **Comprehensive Call Flow Analysis:**
-    *   Detailed sequence diagrams and raw call steps.
-    *   **User-friendly display names for call flows in the UI, parsed from complex Java signatures.**
-*   **Database & DAO Insights:**
-    *   Detection of entities, DAO/repository operations (with basic SQL variable tracking).
-*   **Accurate Spring Boot Detection (Maven & Gradle).**
-*   **User-Friendly Frontend:** Clear presentation, interactive diagram viewers.
-*   **Detailed API Specification Display.**
-*   **Support for JAX-WS `@WebMethod` and improved `@RequestMapping` handling.**
-*   **Enhanced documentation summaries with method calls and tech stack details.**
-
-## 5. Build Status
-
-## 6. Known Limitations & TODOs (High-Level & Code-Level)
-
-*   **Advanced Parsing & Analysis (Backend):**
-    *   Further refinement of REST endpoint detail extraction (complex request/response bodies).
-    *   Deeper YAML parsing if used for project configuration.
-    *   **`DaoAnalyzer.java`**: Handle more complex cases of SQL in variables or constructed dynamically (currently basic support).
-*   **Diagrams & Visualization:**
-    *   More interactive call flow visualization beyond current expand/collapse.
-*   **Frontend Enhancements:**
-    *   UI/UX improvements for very large datasets (filtering, searching, pagination).
-    *   Dark mode.
-    *   **`ApiSpecsPage.js`** (WSDL/XSD rendering): Future enhancement - if `typeAttr` refers to a global `complexType`, expand it (acknowledged, complex).
-*   **Backend Enhancements:**
-    *   Configuration for private Git repositories.
-    *   Performance optimizations for extremely large codebases.
-*   **Export Features:** Confluence publishing, PDF/HTML downloads (future scope).
-
-## Recent Updates (Reflecting latest changes)
-- Diagrams generated as SVG for quality and Confluence.
-- CORS enabled for `/generated-output/**`.
-- JavaParser upgraded for Java 7-21 compatibility.
-- UI warnings for files failing to parse.
-- `svg-viewer.html` for standalone SVG viewing.
-- Sequence diagrams use quoted FQNs.
-- **Symbol Solver & Pre-compilation (Backend)**: `mvn compile` pre-step for enhanced symbol resolution.
-- **WSDL & XSD Deep Parsing (Frontend & Backend)**.
-- **Call Flow Page & Sidebar Navigation (Frontend)**:
-    - Integration of `FlowExplorer.tsx` for better step navigation.
-    - **Implementation of `generateFlowDisplayName` in `CallFlowPage.js` for significantly improved, human-readable names for call flows and sequence diagrams, correctly parsing method signatures including parameters.**
-- **Refined API Specs UI**.
-- **Enhanced Component Diagram for SOAP/Legacy Applications**.
-- **Comprehensive Usecase Diagram for SOAP/Legacy Applications**.
-- **DAO/JDBC Analysis & Database Schema Visualization**:
-    - Automatic identification of DAO/Repository classes.
-    *   Extraction of SQL queries (with basic variable support) and inference from method names.
-    *   Categorization of operations (SELECT, INSERT, UPDATE, DELETE) and table name extraction.
-    *   Generation of Database Schema diagrams linking DAOs to tables.
-    *   **New `DbAnalysisResult` DTO in backend providing `operationsByClass` and `classesByEntity` maps.**
-    *   **Frontend `DatabasePage.js` refactored to display an entity-centric view ("Entities and Interacting Classes") and a detailed DAO operation view (now including method names).**
-    *   **Backend logic to remove redundant service interfaces from DAO listings if their implementation is present.**
-- **Backend TODOs Addressed:**
-    - `EndpointExtractorServiceImpl.java`: Support for `@RequestMapping` method attribute and `@WebMethod` (JAX-WS).
-    - `ProjectDetectorServiceImpl.java`: Added Gradle support for Spring Boot version detection (with regex fixes).
-    - `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced.
-    - `DaoAnalyzer.java`: Basic support for SQL in variables.
-
-(Removed the old "New Feature: DAO/JDBC Analysis" section as its content is now integrated above and in the main sections) 
+*   **`DaoAnalyzer.java`:** Utility class for `DaoAnalysisServiceImpl`

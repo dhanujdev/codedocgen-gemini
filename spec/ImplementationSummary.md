@@ -7,7 +7,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **Goal:** To analyze Java-based applications from public Git repositories, generate documentation, visualizations (diagrams), and provide insights into the codebase.
 *   **Tech Stack:**
     *   **Backend:** Java 21, Spring Boot 3.2.x (Maven), JGit, JavaParser (with JavaSymbolSolver), PlantUML, CommonMark, SpringDoc OpenAPI.
-    *   **Frontend:** React (Create React App), Material UI, Axios, react-router-dom, swagger-ui-react, react-zoom-pan-pinch.
+    *   **Frontend:** React (Create React App), Material UI (Primary), Axios, react-router-dom, swagger-ui-react, react-zoom-pan-pinch.
 *   **Core Workflow:**
     1.  User provides a public Git repository URL via the frontend.
     2.  Frontend sends the URL to the backend's `/api/analysis/analyze` endpoint.
@@ -43,6 +43,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   **`dbAnalysis` (DbAnalysisResult): New composite DTO containing:**
         *   `operationsByClass` (Map<String, List<DaoOperationDetail>>): DAO operations grouped by class FQN.
         *   `classesByEntity` (Map<String, Set<String>>): Map of Entity Name to a Set of FQNs of classes operating on that entity.
+    *   **`logStatements` (List<LogStatement>): Added. Contains all detected log statements with PII/PCI risk analysis.**
 *   **`MavenExecutionResult.java`:** For results of `mvn` commands.
 
 ### 2.3. Models - `com.codedocgen.model`
@@ -54,6 +55,8 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **`DiagramType.java` (enum):** `CLASS_DIAGRAM`, `SEQUENCE_DIAGRAM`, `COMPONENT_DIAGRAM`, `USECASE_DIAGRAM`, `DATABASE_DIAGRAM`, `ENTITY_RELATIONSHIP_DIAGRAM`.
 *   **`DaoOperationDetail.java`:** Details for a single DAO operation (method name, SQL query, tables, operation type).
 *   **`DbAnalysisResult.java`:** New DTO holding `operationsByClass` and `classesByEntity` maps (see above).
+*   **`LogVariable.java`:** Added. Fields: `name`, `type`, `isPii`, `isPci`.
+*   **`LogStatement.java`:** Added. Fields: `id`, `className`, `line`, `level`, `message`, `variables` (List<LogVariable>), `isPiiRisk`, `isPciRisk`.
 
 ### 2.4. Services - `com.codedocgen.service` & `com.codedocgen.service.impl`
 
@@ -70,12 +73,22 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   **Returns `DbAnalysisResult` containing both `operationsByClass` and the new `classesByEntity` mapping.**
     *   Filters redundant interfaces if their implementations are present.
     *   Provides data for the DB schema diagram and DAO operation listings.
+*   **`LoggerInsightsService` / `LoggerInsightsServiceImpl`:** Added.
+    *   Analyzes parsed Java code to extract all SLF4J logger calls and `System.out.println`/`System.err.println` statements.
+    *   Detects potential PII and PCI data exposure using comprehensive, configurable keyword patterns (including common abbreviations and variations like `ssn`, `cardnbr`, `cvv`, `firstnm`, `addr`, `mmn`, etc.) applied to log messages and variable names/types.
+    *   Distinguishes between PII-specific risks, PCI-specific risks, and general sensitive data risks (which flag both PII and PCI).
+    *   Populates `LogStatement` and `LogVariable` objects with findings.
+    *   **PII/PCI keyword regex patterns are now loaded from `application.yml`, allowing for configuration without recompiling.**
+    *   **`YamlParserService` / `YamlParserServiceImpl`:** Newly added. Provides a basic service to parse a YAML file (given its path) into a `Map<String, Object>` using SnakeYAML. This can be leveraged for deeper analysis of project-specific YAML configurations if needed in the future.
 
 ### 2.5. Parsers - `com.codedocgen.parser`
 
 *   **`CallFlowAnalyzer.java`:** Builds detailed call flow sequences.
 *   **`DaoAnalyzer.java`:** Utility class for `DaoAnalysisServiceImpl` to find SQL queries and table names (includes basic support for SQL in string variables).
 *   **`SoapWsdlParser.java`**, **`YamlParser.java`**: Existing parsers.
+*   **`LoggerInsightsServiceImpl.java`**: Continuously refine and expand PII/PCI keyword patterns based on real-world examples and feedback. **Patterns are now externalized to `application.yml`.**
+    *   [COMPLETED] Ensure `org.apache.cxf.jaxrs.swagger` package is available (related to `RestConfig.java` compilation error - resolved by adding `cxf-rt-rs-service-description-swagger` dependency).
+    *   **Deeper YAML Parsing**: Basic `YamlParserService` implemented. Further integration and use depend on identifying specific YAML files within user projects that require deep parsing for meaningful data extraction.
 
 ### 2.6. Controller - `com.codedocgen.controller`
 
@@ -90,7 +103,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
 
 ### 3.2. Core Components & Pages - `src/`
 
-*   **`App.js`:** Main component, manages state, routing.
+*   **`App.js`:** Main component, manages overall application state, primary layout (sidebar + content area), and conditional rendering of pages based on active section (acting as a simple router).
 *   **`Sidebar.js`:** Main navigation.
 *   **`OverviewPage.js`:** Project summary.
 *   **`ClassesPage.js`:** Detailed view of parsed classes.
@@ -105,13 +118,22 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   **Shows "Entities and Interacting DAO/Repository Classes" using `dbAnalysis.classesByEntity`.**
     *   **Shows "Detailed Operations by DAO/Repository Class" using `dbAnalysis.operationsByClass`, now including method names.**
 *   **`GherkinPage.js`:** Shows Gherkin feature file content.
-*   **`DiagramViewer.tsx`:** Reusable component for rendering SVG diagrams. (Note: extension is .tsx)
+*   **`LoggerInsightsPage.js`:** Added. 
+    *   Displays a table of log statements from `analysisData.logStatements`, with each row expandable to show variables.
+    *   Includes "Expand All" and "Collapse All" buttons for managing row expansion.
+    *   Provides filters for log level (via an MUI `Select` dropdown), PII risk, and PCI risk, plus a search field.
+    *   Allows toggling of PII/PCI risk filters.
+    *   Includes PDF export functionality for the filtered log view.
+*   **`DiagramViewer.js`:** Reusable component for rendering SVG diagrams. (Changed from .tsx)
 *   **`services/api.js`:** Axios service.
 *   **`constants/uiConstants.js`:** For `BACKEND_STATIC_BASE_URL`.
 
 ## 4. Functionality Achieved (Key Highlights)
 
 *   **Deep Java Analysis:** Robust parsing with symbol resolution.
+*   **User-Friendly Frontend (Material UI):**
+    *   Standardized on Material UI as the primary UI library, ensuring a consistent and modern look and feel.
+    *   Implemented responsive design, ensuring the application layout (especially the main content area) adapts correctly to different screen sizes and zoom levels.
 *   **Comprehensive Call Flow Analysis:**
     *   Detailed sequence diagrams and raw call steps.
     *   **User-friendly display names for call flows in the UI, parsed from complex Java signatures.**
@@ -120,6 +142,10 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Generation of a database schema diagram.
     *   **Entity-centric view showing which classes operate on each entity.**
     *   Detailed breakdown of operations per DAO/Repository class.
+*   **Logger Insights & Security Analysis:** Added.
+    *   Identification of all logging statements.
+    *   Detection and separate flagging of potential PII and PCI data exposure using extensive keyword patterns.
+    *   UI for reviewing, filtering (including by level via dropdown, PII/PCI risk), expanding/collapsing all log details, and exporting log data.
 *   **Multiple Diagram Types:** Class, Sequence, Component, Usecase, ERD, and Database Schema diagrams.
 *   **Accurate Spring Boot Detection (Maven & Gradle).**
 *   **User-Friendly Frontend:** Clear presentation, interactive diagram viewers.
@@ -137,6 +163,9 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Further refinement of REST endpoint detail extraction (complex request/response bodies).
     *   Deeper YAML parsing if used for project configuration.
     *   **`DaoAnalyzer.java`**: Handle more complex cases of SQL in variables or constructed dynamically (currently basic support).
+    *   **`LoggerInsightsServiceImpl.java`**: Continuously refine and expand PII/PCI keyword patterns based on real-world examples and feedback. ~~Consider externalizing patterns for easier configuration.~~ **Patterns are now externalized to `application.yml`.**
+    *   [COMPLETED] Ensure `org.apache.cxf.jaxrs.swagger` package is available (related to `RestConfig.java` compilation error - resolved by adding `cxf-rt-rs-service-description-swagger` dependency).
+    *   **Deeper YAML Parsing**: Basic `YamlParserService` implemented. Further integration and use depend on identifying specific YAML files within user projects that require deep parsing for meaningful data extraction.
 *   **Diagrams & Visualization:**
     *   More interactive call flow visualization beyond current expand/collapse.
 *   **Frontend Enhancements:**
@@ -146,6 +175,8 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **Backend Enhancements:**
     *   Configuration for private Git repositories.
     *   Performance optimizations for extremely large codebases.
+    *   [MINOR WARNING] Address `Maven project compiled test classes directory ... does not exist` if it becomes problematic (currently considered benign).
+    *   [MINOR WARNING] Address `Could not detect Java version from pom.xml in [cloned_repo]` if it impacts analysis of diverse projects (main project's Java version is set; this refers to temporary clones).
 *   **Export Features:** Confluence publishing, PDF/HTML downloads (future scope).
 
 ## Recent Updates (Reflecting latest changes)
@@ -164,17 +195,18 @@ This document summarizes the current state of the CodeDocGen project, covering b
 - **Enhanced Component Diagram for SOAP/Legacy Applications**.
 - **Comprehensive Usecase Diagram for SOAP/Legacy Applications**.
 - **DAO/JDBC Analysis & Database Schema Visualization**:
-    - Automatic identification of DAO/Repository classes.
     *   Extraction of SQL queries (with basic variable support) and inference from method names.
     *   Categorization of operations (SELECT, INSERT, UPDATE, DELETE) and table name extraction.
     *   Generation of Database Schema diagrams linking DAOs to tables.
     *   **New `DbAnalysisResult` DTO in backend providing `operationsByClass` and `classesByEntity` maps.**
     *   **Frontend `DatabasePage.js` refactored to display an entity-centric view ("Entities and Interacting Classes") and a detailed DAO operation view (now including method names).**
     *   **Backend logic to remove redundant service interfaces from DAO listings if their implementation is present.**
+- **Dependency Management:**
+    - Added `cxf-rt-rs-service-description-swagger` to `pom.xml` to resolve compilation issues with Swagger and CXF JAX-RS.
 - **Backend TODOs Addressed:**
-    - `EndpointExtractorServiceImpl.java`: Support for `@RequestMapping` method attribute and `@WebMethod` (JAX-WS).
-    - `ProjectDetectorServiceImpl.java`: Added Gradle support for Spring Boot version detection (with regex fixes).
-    - `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced.
-    - `DaoAnalyzer.java`: Basic support for SQL in variables.
+    *   `EndpointExtractorServiceImpl.java`: Support for `@RequestMapping` method attribute and `@WebMethod` (JAX-WS). - ✅ DONE
+    *   `ProjectDetectorServiceImpl.java`: Added Gradle support for Spring Boot version detection (with regex fixes). - ✅ DONE
+    *   `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced.
+    *   `DaoAnalyzer.java`: Basic support for SQL in variables.
 
 (Removed the old "New Feature: DAO/JDBC Analysis" section as its content is now integrated above and in the main sections) 

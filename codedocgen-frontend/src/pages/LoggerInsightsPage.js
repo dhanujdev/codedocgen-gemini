@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, CircularProgress, Alert, TextField, Button, Box, IconButton, Collapse, Switch, FormControlLabel } from '@mui/material';
+import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, CircularProgress, Alert, TextField, Button, Box, IconButton, Collapse, Switch, FormControlLabel, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
 import { KeyboardArrowDown, KeyboardArrowUp } from '@mui/icons-material';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
-const LogRow = ({ log }) => {
-    const [open, setOpen] = useState(false);
+const LogRow = ({ log, isInitiallyOpen }) => {
+    const [open, setOpen] = useState(isInitiallyOpen);
+
+    useEffect(() => {
+        setOpen(isInitiallyOpen);
+    }, [isInitiallyOpen]);
 
     const getRiskColor = (isRisk) => {
         return isRisk ? 'red' : 'inherit';
@@ -85,14 +89,20 @@ const LoggerInsightsPage = ({ analysisData, analysisLoading, analysisError, repo
     const [levelFilter, setLevelFilter] = useState('');
     const [piiFilter, setPiiFilter] = useState(false);
     const [pciFilter, setPciFilter] = useState(false);
+    const [allRowsExpanded, setAllRowsExpanded] = useState(false);
+    const [availableLevels, setAvailableLevels] = useState([]);
 
     useEffect(() => {
         if (analysisData && analysisData.logStatements) {
-            setAllLogsFromAnalysis(analysisData.logStatements || []);
-            setFilteredLogs(analysisData.logStatements || []);
+            const logs = analysisData.logStatements || [];
+            setAllLogsFromAnalysis(logs);
+            setFilteredLogs(logs);
+            const levels = [...new Set(logs.map(log => log.level?.toUpperCase()).filter(Boolean))].sort();
+            setAvailableLevels(levels);
         } else {
             setAllLogsFromAnalysis([]);
             setFilteredLogs([]);
+            setAvailableLevels([]);
         }
     }, [analysisData]);
 
@@ -171,24 +181,32 @@ const LoggerInsightsPage = ({ analysisData, analysisLoading, analysisError, repo
                     size="small"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    sx={{ flexGrow: 1, minWidth: '200px' }}
+                    sx={{ flexGrow: 1, minWidth: '150px' }}
                 />
-                <TextField 
-                    label="Filter by Level (e.g., ERROR)"
-                    variant="outlined" 
-                    size="small"
-                    value={levelFilter}
-                    onChange={(e) => setLevelFilter(e.target.value)}
-                    sx={{ minWidth: '200px' }}
-                />
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                    <InputLabel id="level-filter-label">Level</InputLabel>
+                    <Select
+                        labelId="level-filter-label"
+                        label="Level"
+                        value={levelFilter}
+                        onChange={(e) => setLevelFilter(e.target.value)}
+                    >
+                        <MenuItem value=""><em>All Levels</em></MenuItem>
+                        {availableLevels.map(level => (
+                            <MenuItem key={level} value={level.toLowerCase()}>{level}</MenuItem>
+                        ))}
+                    </Select>
+                </FormControl>
                 <FormControlLabel
                     control={<Switch checked={piiFilter} onChange={(e) => setPiiFilter(e.target.checked)} />}
-                    label="Show PII Risk Only"
+                    label="PII Risk Only"
                 />
                 <FormControlLabel
                     control={<Switch checked={pciFilter} onChange={(e) => setPciFilter(e.target.checked)} />}
-                    label="Show PCI Risk Only"
+                    label="PCI Risk Only"
                 />
+                <Button variant="outlined" size="small" onClick={() => setAllRowsExpanded(true)} sx={{ height: 'fit-content' }}>Expand All</Button>
+                <Button variant="outlined" size="small" onClick={() => setAllRowsExpanded(false)} sx={{ height: 'fit-content' }}>Collapse All</Button>
                 <Button variant="contained" onClick={downloadPdfReport} sx={{ height: 'fit-content' }}>Download PDF</Button>
             </Box>
 
@@ -196,7 +214,8 @@ const LoggerInsightsPage = ({ analysisData, analysisLoading, analysisError, repo
                 <Table aria-label="collapsible table">
                     <TableHead>
                         <TableRow>
-                            <TableCell /> {/* For expand icon */}
+                            <TableCell sx={{ width: '50px' }}>
+                            </TableCell>
                             <TableCell>Class/Filename</TableCell>
                             <TableCell>Line No.</TableCell>
                             <TableCell>Level</TableCell>
@@ -208,7 +227,7 @@ const LoggerInsightsPage = ({ analysisData, analysisLoading, analysisError, repo
                     <TableBody>
                         {filteredLogs.length > 0 ? (
                             filteredLogs.map((log) => (
-                                <LogRow key={log.id || `${log.className}-${log.line}`} log={log} />
+                                <LogRow key={log.id || `${log.className}-${log.line}`} log={log} isInitiallyOpen={allRowsExpanded} />
                             ))
                         ) : (
                             <TableRow>

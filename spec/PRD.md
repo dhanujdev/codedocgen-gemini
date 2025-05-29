@@ -30,7 +30,7 @@
 ### 🧱 Tech Stack
 
 *   **Backend**: Java 21, Spring Boot (Maven)
-*   **Frontend**: React, Material UI, Axios
+*   **Frontend**: React, Material UI (Primary), Axios
 *   **Parser Tools**: JavaParser (with symbol resolution), Reflection, Custom WSDL/XML parsers.
 *   **Diagram Generator**: PlantUML (rendered to SVG)
 *   **API Visualization**: Swagger UI + custom WSDL/XSD explorer.
@@ -55,7 +55,7 @@
 *   **Database Analysis**: Generate schema diagrams; Extract DAO operations; **Provide entity-to-class mappings.**
 
 #### 🔹 Iteration 10–12: UI and Publishing
-*   Dashboard UI (sidebar navigation):
+*   Dashboard UI (Material UI based, with sidebar navigation):
     *   Overview (project summary)
     *   API Specs (SwaggerUI, WSDL/XSD view)
     *   Call Flow (Sequence diagram viewer)
@@ -65,6 +65,15 @@
     *   Gherkin Features
 *   Export options (Future Enhancement)
 *   Publish to Confluence (Future Enhancement)
+*   **Logger Insights**:
+    *   Provides a comprehensive overview of all logging statements in the codebase.
+    *   Identifies insecure or excessive logging, especially any exposure of **Personally Identifiable Information (PII)** and **Payment Card Industry (PCI)** data. Utilizes an extensive keyword pattern matching system, including common abbreviations and variations, to detect potential risks. **These keyword patterns are now configurable via the backend's `application.yml` file, allowing for easier customization and updates.**
+    *   Helps security consultants audit logs easily.
+    *   Displays logs in a table with class/filename, line number, log level, message, variables, and separate **PII Risk** and **PCI Risk** flags. Each log entry can be expanded to view associated variables.
+    *   Includes "Expand All" and "Collapse All" buttons for log entry details.
+    *   Allows filtering by class, **log level (via a dropdown menu)**, **PII risk**, and **PCI risk**.
+    *   Includes toggles to show/hide logs flagged for PII or PCI risk.
+    *   Option to download a PDF report of the filtered view.
 
 ---
 
@@ -102,6 +111,7 @@
     *   Broader SOAP annotation support (`EndpointExtractorServiceImpl.java`).
     *   Gradle support for Spring Boot version detection (`ProjectDetectorServiceImpl.java`).
     *   Richer project/method summaries (`DocumentationServiceImpl.java`).
+    *   **Deeper YAML Parsing**: Basic YAML parsing capability added (`YamlParserService`); future enhancements could leverage this for projects using YAML for significant configuration (beyond simple properties).
 *   **Frontend Display:**
     *   Expandable call flows (`FlowExplorer.tsx`).
     *   Global `complexType` expansion in WSDL/XSD view (`ApiSpecsPage.js`).

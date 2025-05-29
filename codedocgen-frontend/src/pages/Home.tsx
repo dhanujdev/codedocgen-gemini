@@ -1,5 +1,8 @@
 import React from 'react';
 import RepoForm from '../components/RepoForm';
+import Container from '@mui/material/Container';
+import Typography from '@mui/material/Typography';
+import Box from '@mui/material/Box';
 
 type HomePageProps = {
   onAnalyze: (repoUrl: string) => void;
@@ -8,12 +11,16 @@ type HomePageProps = {
 
 const HomePage: React.FC<HomePageProps> = ({ onAnalyze, isLoading }) => {
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-4">CodeDocGen</h1>
-      <p className="mb-8">Enter a public Git repository URL to generate documentation and visualizations.</p>
+    <Container maxWidth={false} sx={{ mt: 4, mb: 4 }}>
+      <Typography variant="h3" component="h1" sx={{ fontWeight: 'bold', mb: 2 }}>
+        CodeDocGen
+      </Typography>
+      <Typography variant="subtitle1" sx={{ mb: 4 }}>
+        Enter a public Git repository URL to generate documentation and visualizations.
+      </Typography>
       {/* @ts-ignore: RepoForm is a JS component, so ignore TS props check */}
       <RepoForm onAnalyze={onAnalyze} isLoading={isLoading} />
-    </div>
+    </Container>
   );
 };
 
