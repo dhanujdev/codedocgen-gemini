@@ -37,6 +37,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import com.codedocgen.parser.CallFlowAnalyzer;
 import com.codedocgen.service.DaoAnalysisService;
+import com.codedocgen.model.DbAnalysisResult;
 
 @RestController
 @RequestMapping("/api/analysis")
@@ -209,54 +210,55 @@ public class AnalysisController {
             // 9. Analyze DAO operations
             logger.info("Analyzing DAO/Repository classes for database operations");
             try {
-                Map<String, List<com.codedocgen.model.DaoOperationDetail>> daoOperations = daoAnalysisService.analyzeDbOperations(classMetadataList, localRepoPath);
-                if (daoOperations != null) {
-                    response.setDaoOperations(daoOperations);
-                    logger.info("Found database operations in {} DAO/Repository classes", daoOperations.size());
+                // Call the updated service method which returns DbAnalysisResult
+                DbAnalysisResult dbAnalysisResult = daoAnalysisService.analyzeDbOperations(classMetadataList, localRepoPath);
+                
+                // Set the new composite object in the response
+                response.setDbAnalysis(dbAnalysisResult);
+
+                // For backward compatibility or if still needed directly, also set the old daoOperations field
+                // and dbDiagramPath (though dbDiagramPath might be better handled via dbAnalysisResult.getOperationsByClass() if it affects diagram generation)
+                if (dbAnalysisResult != null) {
+                    response.setDaoOperations(dbAnalysisResult.getOperationsByClass()); 
+                    logger.info("Found database operations in {} DAO/Repository classes", 
+                                dbAnalysisResult.getOperationsByClass() != null ? dbAnalysisResult.getOperationsByClass().size() : 0);
 
                     // 10. Generate database schema diagram if DAO operations were found
-                    if (!daoOperations.isEmpty()) {
+                    if (dbAnalysisResult.getOperationsByClass() != null && !dbAnalysisResult.getOperationsByClass().isEmpty()) {
                         try {
                             logger.info("Generating database schema diagram");
-                            String dbDiagramAbsPath = daoAnalysisService.generateDbDiagram(classMetadataList, daoOperations, diagramsSubDir.getAbsolutePath());
+                            // Pass the operationsByClass part to generateDbDiagram
+                            String dbDiagramAbsPath = daoAnalysisService.generateDbDiagram(classMetadataList, dbAnalysisResult.getOperationsByClass(), diagramsSubDir.getAbsolutePath());
                             if (dbDiagramAbsPath != null) {
                                 String pathPrefixToTrim = new File(outputBasePath).getAbsolutePath();
                                 String relativePath = dbDiagramAbsPath.replace(pathPrefixToTrim, "").replace("\\", "/");
-                                if (relativePath.startsWith("/")) {
-                                    relativePath = relativePath.substring(1);
+                                if (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
+                                response.setDbDiagramPath("/generated-output/" + relativePath); 
+                                // Also update the main diagrams map if DATABASE_DIAGRAM is a key it uses
+                                if (response.getDiagrams() != null) { // Ensure diagrams map exists
+                                   response.getDiagrams().put(com.codedocgen.model.DiagramType.DATABASE_DIAGRAM, "/generated-output/" + relativePath);
+                                } else {
+                                   Map<com.codedocgen.model.DiagramType, String> diagramsMap = new java.util.HashMap<>();
+                                   diagramsMap.put(com.codedocgen.model.DiagramType.DATABASE_DIAGRAM, "/generated-output/" + relativePath);
+                                   response.setDiagrams(diagramsMap);
                                 }
-                                response.setDbDiagramPath("/generated-output/" + relativePath);
-                                
-                                // Also add to the diagrams map
-                                Map<com.codedocgen.model.DiagramType, String> diagrams = response.getDiagrams();
-                                if (diagrams == null) {
-                                    diagrams = new java.util.HashMap<>();
-                                    response.setDiagrams(diagrams);
-                                }
-                                diagrams.put(com.codedocgen.model.DiagramType.DATABASE_DIAGRAM, "/generated-output/" + relativePath);
-                                
-                                logger.info("Database schema diagram generated at {}", dbDiagramAbsPath);
-                            } else {
-                                logger.warn("Failed to generate database schema diagram");
                             }
                         } catch (Exception e) {
-                            logger.error("Error generating database diagram for URL {}: {}", repoUrl, e.getMessage(), e);
+                            logger.error("Error generating database diagram: {}", e.getMessage(), e);
+                            response.setDbDiagramPath("Error generating diagram: " + e.getMessage());
                         }
                     } else {
-                        logger.info("No database operations found, skipping database schema diagram generation");
+                        logger.info("No DAO operations found, skipping database schema diagram generation.");
                     }
                 } else {
-                    logger.warn("DAO analysis returned null operations map");
-                    response.setDaoOperations(new java.util.HashMap<>());
+                    logger.info("No database analysis result returned.");
                 }
             } catch (Exception e) {
-                logger.error("Error during DAO repository analysis for URL {}: {}", repoUrl, e.getMessage(), e);
-                // Continue processing - don't fail the entire analysis due to DAO analysis errors
-                // Initialize an empty map to avoid null pointer exceptions in the frontend
-                response.setDaoOperations(new java.util.HashMap<>());
+                logger.error("Error during DAO analysis or DB diagram generation: {}", e.getMessage(), e);
+                // Optionally set an error message in the response for these parts
             }
 
-            // Return the response
+            // 11. Finalize and return response
             logger.info("Completed analysis for repository: {}", repoUrl);
             return ResponseEntity.ok(response);
 

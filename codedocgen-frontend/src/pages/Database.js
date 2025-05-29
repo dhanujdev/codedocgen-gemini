@@ -1,5 +1,5 @@
 import React from 'react';
-import { Typography, Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Divider } from '@mui/material';
+import { Typography, Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Divider, List, ListItem, ListItemText } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import DiagramViewer from '../components/DiagramViewer';
 
@@ -22,15 +22,18 @@ const operationTypeColors = {
   'UNKNOWN': 'default'
 };
 
+const BACKEND_STATIC_BASE_URL = process.env.REACT_APP_BACKEND_BASE_URL || 'http://localhost:8080';
+
 const Database = ({ analysisResult }) => {
-  if (!analysisResult || !analysisResult.daoOperations) {
+  if (!analysisResult || !analysisResult.dbAnalysis || 
+      (!analysisResult.dbAnalysis.operationsByClass && !analysisResult.dbAnalysis.classesByEntity)) {
     return (
       <Box sx={{ p: 3 }}>
         <Typography variant="h4" gutterBottom>
           Database Analysis
         </Typography>
         <Typography variant="body1">
-          No database operations found in the codebase.
+          No database analysis results found.
         </Typography>
         <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
           This could be because:
@@ -44,19 +47,22 @@ const Database = ({ analysisResult }) => {
     );
   }
 
-  const daoOperations = analysisResult.daoOperations;
+  const operationsByClass = analysisResult.dbAnalysis.operationsByClass || {};
+  const classesByEntity = analysisResult.dbAnalysis.classesByEntity || {};
+  
   const dbDiagramPath = analysisResult.dbDiagramPath || (analysisResult.diagrams && analysisResult.diagrams['DATABASE_DIAGRAM']);
   
-  // Extract all unique entity names from allClassMetadata
-  const allEntities = new Set();
-  if (analysisResult.classes) {
-    analysisResult.classes.forEach(cls => {
-      const isEntity = cls.type === 'entity' || (cls.annotations && cls.annotations.some(ann => ann.includes('@Entity')));
-      if (isEntity && cls.name) {
-        allEntities.add(cls.name); // Add the class name, which should correspond to the entity/table name
-      }
-    });
+  let databaseDiagramObject = null;
+  if (dbDiagramPath) {
+    databaseDiagramObject = {
+      key: 'database-schema',
+      title: 'Database Schema Diagram',
+      url: dbDiagramPath.startsWith('http') ? dbDiagramPath : `${BACKEND_STATIC_BASE_URL}${dbDiagramPath}`,
+      type: 'IMAGE'
+    };
   }
+
+  const allEntityNamesFromClassesByEntity = Object.keys(classesByEntity);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -64,94 +70,116 @@ const Database = ({ analysisResult }) => {
         Database Analysis
       </Typography>
       
-      {dbDiagramPath && (
+      {databaseDiagramObject && (
         <StyledPaper elevation={3}>
           <Typography variant="h5" gutterBottom>
             Database Schema Diagram
           </Typography>
-          <DiagramViewer 
-            diagramPath={dbDiagramPath} 
-            alt="Database Schema" 
-            style={{ width: '100%', border: '1px solid #ccc' }}
-          />
+          <DiagramViewer diagram={databaseDiagramObject} />
         </StyledPaper>
       )}
       
-      <StyledPaper elevation={3}>
-        <Typography variant="h5" gutterBottom>
-          Tables Detected
-        </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, my: 2 }}>
-          {Array.from(allEntities).map(entityName => (
-            <Chip 
-              key={entityName} 
-              label={entityName} // Display entity name
-              variant="outlined" 
-              color="primary"
-            />
-          ))}
-        </Box>
-      </StyledPaper>
-      
-      <Typography variant="h5" gutterBottom>
-        Database Operations by DAO/Repository Class
+      <Typography variant="h5" gutterBottom sx={{ mt: 4 }}>
+        Entities and Interacting DAO/Repository Classes
+      </Typography>
+      {allEntityNamesFromClassesByEntity.length > 0 ? (
+        allEntityNamesFromClassesByEntity.map(entityName => (
+          <StyledPaper key={entityName} elevation={3}>
+            <Typography variant="h6" gutterBottom>
+              Entity: {entityName}
+            </Typography>
+            <Typography variant="subtitle1" color="textSecondary" gutterBottom>
+              Interacting Classes:
+            </Typography>
+            <List dense>
+              {(classesByEntity[entityName] || []).map(interactingClassFqn => {
+                const simpleName = interactingClassFqn.substring(interactingClassFqn.lastIndexOf('.') + 1);
+                return (
+                  <ListItem key={interactingClassFqn}>
+                    <ListItemText 
+                      primary={simpleName} 
+                      secondary={interactingClassFqn} 
+                    />
+                  </ListItem>
+                );
+              })}
+            </List>
+          </StyledPaper>
+        ))
+      ) : (
+        <StyledPaper elevation={3}>
+          <Typography variant="body1">
+            No specific entity-to-class interactions found.
+          </Typography>
+        </StyledPaper>
+      )}
+
+      <Typography variant="h5" gutterBottom sx={{ mt: 4 }}>
+        Detailed Operations by DAO/Repository Class
       </Typography>
       
-      {Object.entries(daoOperations).map(([className, operations]) => {
-        const simpleName = className.substring(className.lastIndexOf('.') + 1);
-        
-        return (
-          <StyledPaper key={className} elevation={3}>
-            <Typography variant="h6" gutterBottom>
-              {simpleName}
-              <Typography variant="caption" color="textSecondary" sx={{ ml: 1 }}>
-                {className}
+      {Object.entries(operationsByClass).length > 0 ? (
+        Object.entries(operationsByClass).map(([className, operations]) => {
+          const simpleName = className.substring(className.lastIndexOf('.') + 1);
+          return (
+            <StyledPaper key={className} elevation={3}>
+              <Typography variant="h6" gutterBottom>
+                {simpleName}
+                <Typography variant="caption" color="textSecondary" sx={{ ml: 1 }}>
+                  {className}
+                </Typography>
               </Typography>
-            </Typography>
-            
-            <Divider sx={{ my: 2 }} />
-            
-            <StyledTableContainer component={Paper}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Operation Type</TableCell>
-                    <TableCell>Tables</TableCell>
-                    <TableCell>SQL Query</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {operations.map((operation, index) => (
-                    <TableRow key={index} hover>
-                      <TableCell>
-                        <Chip 
-                          label={operation.operationType} 
-                          color={operationTypeColors[operation.operationType] || 'default'} 
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {operation.tables && operation.tables.map(table => (
-                          <Chip 
-                            key={table} 
-                            label={table} 
-                            variant="outlined" 
-                            size="small" 
-                            sx={{ m: 0.5 }}
-                          />
-                        ))}
-                      </TableCell>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                        {operation.sqlQuery}
-                      </TableCell>
+              <Divider sx={{ my: 2 }} />
+              <StyledTableContainer component={Paper}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Operation Type</TableCell>
+                      <TableCell>Method Name</TableCell>
+                      <TableCell>Tables</TableCell>
+                      <TableCell>SQL Query</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </StyledTableContainer>
-          </StyledPaper>
-        );
-      })}
+                  </TableHead>
+                  <TableBody>
+                    {operations.map((operation, index) => (
+                      <TableRow key={index} hover>
+                        <TableCell>
+                          <Chip 
+                            label={operation.operationType} 
+                            color={operationTypeColors[operation.operationType] || 'default'} 
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>{operation.methodName || 'N/A'}</TableCell>
+                        <TableCell>
+                          {operation.tables && operation.tables.map(table => (
+                            <Chip 
+                              key={table} 
+                              label={table} 
+                              variant="outlined" 
+                              size="small" 
+                              sx={{ m: 0.5 }}
+                            />
+                          ))}
+                        </TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                          {operation.sqlQuery}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </StyledTableContainer>
+            </StyledPaper>
+          );
+        })
+      ) : (
+        <StyledPaper elevation={3}>
+          <Typography variant="body1">
+            No DAO/Repository operations found.
+          </Typography>
+        </StyledPaper>
+      )}
     </Box>
   );
 };

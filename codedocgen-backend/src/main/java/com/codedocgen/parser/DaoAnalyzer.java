@@ -90,7 +90,7 @@ public class DaoAnalyzer {
                (lower.startsWith("delete from ") && lower.contains(" where ")); // `where` is common but not strictly necessary for delete all
     }
 
-    private DaoOperationDetail.SqlOperationType extractSqlOperationType(String sql) {
+    public DaoOperationDetail.SqlOperationType extractSqlOperationType(String sql) {
         String trimmedSql = sql.trim().toLowerCase();
         if (trimmedSql.startsWith("select")) return DaoOperationDetail.SqlOperationType.SELECT;
         if (trimmedSql.startsWith("insert")) return DaoOperationDetail.SqlOperationType.INSERT;
@@ -99,7 +99,7 @@ public class DaoAnalyzer {
         return DaoOperationDetail.SqlOperationType.UNKNOWN;
     }
 
-    private List<String> extractTableNames(String sql) {
+    public List<String> extractTableNames(String sql) {
         Set<String> tables = new HashSet<>(); // Use Set to avoid duplicate table names from the same query
         Matcher m = TABLE_PATTERN.matcher(sql);
         while (m.find()) {

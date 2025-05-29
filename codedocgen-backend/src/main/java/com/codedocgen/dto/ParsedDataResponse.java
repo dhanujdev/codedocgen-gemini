@@ -4,6 +4,7 @@ import com.codedocgen.model.ClassMetadata;
 import com.codedocgen.model.EndpointMetadata;
 import com.codedocgen.model.DiagramType;
 import com.codedocgen.model.DaoOperationDetail;
+import com.codedocgen.model.DbAnalysisResult;
 import lombok.Data;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,25 @@ public class ParsedDataResponse {
     private Map<String, String> sequenceDiagrams; // Entrypoint FQN -> sequence diagram URL
     private Map<String, List<DaoOperationDetail>> daoOperations; // DAO class FQN -> list of database operations
     private String dbDiagramPath; // Path to database schema diagram
+    private DbAnalysisResult dbAnalysis; // New field for the comprehensive DB analysis
 
     // Consider adding fields for call flows, DAO info, etc., as parsing capabilities are built.
+
+    // Getter and Setter for daoOperations (existing)
+    public Map<String, List<DaoOperationDetail>> getDaoOperations() {
+        return daoOperations;
+    }
+
+    public void setDaoOperations(Map<String, List<DaoOperationDetail>> daoOperations) {
+        this.daoOperations = daoOperations;
+    }
+
+    // Getter and Setter for dbAnalysis (new)
+    public DbAnalysisResult getDbAnalysis() {
+        return dbAnalysis;
+    }
+
+    public void setDbAnalysis(DbAnalysisResult dbAnalysis) {
+        this.dbAnalysis = dbAnalysis;
+    }
 } 

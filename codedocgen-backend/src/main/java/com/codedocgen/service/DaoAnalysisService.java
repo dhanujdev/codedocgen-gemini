@@ -2,6 +2,7 @@ package com.codedocgen.service;
 
 import com.codedocgen.model.ClassMetadata;
 import com.codedocgen.model.DaoOperationDetail;
+import com.codedocgen.model.DbAnalysisResult;
 
 import java.io.File;
 import java.util.List;
@@ -18,7 +19,7 @@ public interface DaoAnalysisService {
      * @param projectDir The root directory of the project
      * @return Map of class FQN to list of DAO operations
      */
-    Map<String, List<DaoOperationDetail>> analyzeDbOperations(List<ClassMetadata> classes, File projectDir);
+    DbAnalysisResult analyzeDbOperations(List<ClassMetadata> classes, File projectDir);
     
     /**
      * Generate diagram showing database tables and their relationships
