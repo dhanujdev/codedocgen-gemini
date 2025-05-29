@@ -1,13 +1,31 @@
-import React from 'react';
+import React, { useState } from 'react';
+
+interface FlowStep {
+  // Define structure of a step, e.g.,
+  id: string;
+  action: string;
+  details?: string;
+}
+interface Flow {
+  name: string;
+  description?: string;
+  steps?: FlowStep[] | string[]; // Can be an array of objects or simple strings
+}
 
 interface FlowExplorerProps {
-  flows: any[]; // Replace 'any' with a proper type for flow data
+  flows: Flow[];
 }
 
 const FlowExplorer: React.FC<FlowExplorerProps> = ({ flows }) => {
+  const [expandedFlowIndex, setExpandedFlowIndex] = useState<number | null>(null);
+
   if (!flows || flows.length === 0) {
     return <p>No call flows available to display.</p>;
   }
+
+  const toggleFlowExpansion = (index: number) => {
+    setExpandedFlowIndex(expandedFlowIndex === index ? null : index);
+  };
 
   return (
     <div>
@@ -18,11 +36,22 @@ const FlowExplorer: React.FC<FlowExplorerProps> = ({ flows }) => {
         For now, a simple list of flow starting points or summaries.
       */}
       <ul>
-        {flows.map((flow: any, index) => (
+        {flows.map((flow, index) => (
           <li key={index} className="border-b py-2">
-            <h3 className="font-medium">{flow.name || 'Unnamed Flow'}</h3>
-            <p className="text-sm text-gray-600">{flow.description || 'No description.'}</p>
-            {/* TODO: Add more details or a way to expand/explore the flow */}
+            <div onClick={() => toggleFlowExpansion(index)} style={{ cursor: 'pointer' }}>
+              <h3 className="font-medium">{flow.name || 'Unnamed Flow'}</h3>
+              <p className="text-sm text-gray-600">{flow.description || 'No description.'}</p>
+            </div>
+            {/* TODO: Add more details or a way to expand/explore the flow - Implemented basic expand/collapse */}
+            {expandedFlowIndex === index && flow.steps && (
+              <ul className="mt-2 pl-4 list-disc list-inside bg-gray-50 p-2 rounded">
+                {flow.steps.map((step, stepIndex) => (
+                  <li key={stepIndex} className="text-sm">
+                    {typeof step === 'string' ? step : `${step.action} ${step.details ? '('+step.details+')' : ''}`}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>

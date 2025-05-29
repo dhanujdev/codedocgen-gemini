@@ -13,6 +13,7 @@ import HomePage from './pages/Home';
 import ApiSpecsPage from './pages/ApiSpecsPage';
 import CallFlowPage from './pages/CallFlowPage';
 import DatabasePage from './pages/Database';
+import LoggerInsightsPage from './pages/LoggerInsightsPage';
 import '@fontsource/quicksand/400.css';
 import '@fontsource/quicksand/700.css';
 
@@ -41,10 +42,11 @@ function App() {
   // const [aboutOpen, setAboutOpen] = useState(false); // Assuming this is for a modal, not directly related to API calls
   const [activeSection, setActiveSection] = useState('Home'); // Changed initial to 'Home'
   const [repoName, setRepoName] = useState('');
-  const [endpoints, setEndpoints] = useState([]);
-  const [features, setFeatures] = useState(null); // New state for features
-  const [entities, setEntities] = useState([]); // New state for entities (classes)
-  const [diagramMap, setDiagramMap] = useState(null); // New state for diagrams object
+  // Removed individual states for endpoints, features, entities, diagramMap as they are part of analysisResult
+  // const [endpoints, setEndpoints] = useState([]); 
+  // const [features, setFeatures] = useState(null); 
+  // const [entities, setEntities] = useState([]); 
+  // const [diagramMap, setDiagramMap] = useState(null);
 
   const extractRepoName = (repoUrl) => {
     const match = repoUrl.match(/github\.com[/:][^/]+\/([^/.]+)(?:\.git)?/);
@@ -55,39 +57,39 @@ function App() {
     setIsLoading(true);
     setError(null);
     setAnalysisResult(null);
-    setEndpoints([]);
-    setFeatures(null);
-    setEntities([]);
-    setDiagramMap(null);
-    console.log('[App.js] handleAnalyze: diagramMap reset to null');
+    // setEndpoints([]); // No longer needed
+    // setFeatures(null); // No longer needed
+    // setEntities([]); // No longer needed
+    // setDiagramMap(null); // No longer needed
+    // console.log('[App.js] handleAnalyze: diagramMap reset to null'); // No longer needed
     setRepoName('');
 
     try {
       // Use API_BASE_URL and specific endpoint
       const response = await axios.post(`${API_BASE_URL}/analysis/analyze`, { repoUrl });
       const data = response.data;
-      setAnalysisResult(data);
+      setAnalysisResult(data); // This now includes logStatements
       
       const extractedName = extractRepoName(repoUrl);
       setRepoName(extractedName || data.projectName || 'Repository');
       
-      setEndpoints(data.endpoints || []);
-      setFeatures(data.featureFiles || null); // Assuming featureFiles is the correct field
-      setEntities(data.classes || []); // Assuming classes is the correct field for entities
-      
-      console.log('[App.js] handleAnalyze: Attempting to set diagramMap from data.diagrams:', JSON.stringify(data.diagrams));
-      setDiagramMap(data.diagrams || null); 
+      // These are now accessed via analysisResult directly in child components if needed
+      // setEndpoints(data.endpoints || []);
+      // setFeatures(data.featureFiles || null); 
+      // setEntities(data.classes || []); 
+      // console.log('[App.js] handleAnalyze: Attempting to set diagramMap from data.diagrams:', JSON.stringify(data.diagrams));
+      // setDiagramMap(data.diagrams || null); 
       
       setActiveSection('Overview');
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'Failed to analyze repository.');
       // Clear data on error
       setAnalysisResult(null);
-      setEndpoints([]);
-      setFeatures(null);
-      setEntities([]);
-      setDiagramMap(null);
-      console.log('[App.js] handleAnalyze error: diagramMap reset to null');
+      // setEndpoints([]); // No longer needed
+      // setFeatures(null); // No longer needed
+      // setEntities([]); // No longer needed
+      // setDiagramMap(null); // No longer needed
+      // console.log('[App.js] handleAnalyze error: diagramMap reset to null'); // No longer needed
       setRepoName('');
     }
     setIsLoading(false);
@@ -102,9 +104,9 @@ function App() {
   };
 
   // Log diagramMap before rendering DiagramsPage
-  if (activeSection === 'Diagrams') {
-    console.log('[App.js] Rendering DiagramsPage, current diagramMap state:', JSON.stringify(diagramMap));
-  }
+  // if (activeSection === 'Diagrams') { // No longer needed as diagramMap is part of analysisResult
+  //   console.log('[App.js] Rendering DiagramsPage, current diagramMap state:', JSON.stringify(diagramMap));
+  // }
 
   return (
     <ThemeProvider theme={theme}>
@@ -115,16 +117,16 @@ function App() {
           <Box sx={{ width: '100%', maxWidth: 1200, p: 4, pt: 3, pb: 6, background: '#fff', borderRadius: 3, boxShadow: 2, mt: 4, mb: 4, minHeight: 600 }}>
             {activeSection === 'Home' && <HomePage onAnalyze={handleAnalyze} isLoading={isLoading} error={error} onCloseError={handleCloseSnackbar} />}
             {activeSection === 'Overview' && <OverviewPage analysisResult={analysisResult} repoName={repoName} />}
-            {activeSection === 'Endpoints' && <EndpointsPage endpoints={endpoints} repoName={repoName}/>}
+            {activeSection === 'Endpoints' && <EndpointsPage endpoints={analysisResult?.endpoints} repoName={repoName}/>} {/* Pass from analysisResult */}
             {activeSection === 'API Specs' && <ApiSpecsPage analysisResult={analysisResult} repoName={repoName} />}
             {activeSection === 'Call Flow' && <CallFlowPage analysisResult={analysisResult} repoName={repoName} />}
-            {activeSection === 'Features' && <FeaturesPage features={features} repoName={repoName} />}
-            {activeSection === 'Entities' && <EntitiesPage entities={entities} endpoints={endpoints} repoName={repoName} />}
+            {activeSection === 'Features' && <FeaturesPage features={analysisResult?.featureFiles} repoName={repoName} />} {/* Pass from analysisResult */}
+            {activeSection === 'Entities' && <EntitiesPage entities={analysisResult?.classes} endpoints={analysisResult?.endpoints} repoName={repoName} />} {/* Pass from analysisResult */}
             {activeSection === 'Database' && <DatabasePage analysisResult={analysisResult} repoName={repoName} />}
-            {activeSection === 'All Classes' && <AllClassesPage entities={entities} repoName={repoName} />}
+            {activeSection === 'All Classes' && <AllClassesPage entities={analysisResult?.classes} repoName={repoName} />} {/* Pass from analysisResult */}
             {activeSection === 'Diagrams' && 
-              (console.log('[App.js] Actually rendering DiagramsPage with diagramMap:', JSON.stringify(diagramMap)), 
-              <DiagramsPage diagramMap={diagramMap} sequenceDiagrams={analysisResult?.sequenceDiagrams} rawCallFlows={analysisResult?.callFlows} repoName={repoName} />)}
+              <DiagramsPage diagramMap={analysisResult?.diagrams} sequenceDiagrams={analysisResult?.sequenceDiagrams} rawCallFlows={analysisResult?.callFlows} repoName={repoName} />}
+            {activeSection === 'Logger Insights' && <LoggerInsightsPage analysisData={analysisResult} analysisLoading={isLoading} analysisError={error} repoUrl={analysisResult?.projectName} /> } {/* Added LoggerInsightsPage */}
             {activeSection === 'Publish' && <PublishPage repoName={repoName} analysisResult={analysisResult}/>} {/* PublishPage might need full analysisResult*/}
           </Box>
           <Box sx={{ textAlign: 'center', color: '#aaa', fontSize: 14, mb: 2, mt: 'auto' }}>

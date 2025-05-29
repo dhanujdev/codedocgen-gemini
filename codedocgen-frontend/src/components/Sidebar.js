@@ -10,6 +10,7 @@ import ArticleIcon from '@mui/icons-material/Article';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import ClassIcon from '@mui/icons-material/Class';
 import StorageIcon from '@mui/icons-material/Storage';
+import PolicyIcon from '@mui/icons-material/Policy';
 
 const NAV_ITEMS = [
   { label: 'Home', icon: <HomeIcon /> },
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { label: 'Database', icon: <StorageIcon /> },
   { label: 'All Classes', icon: <ClassIcon /> },
   { label: 'Diagrams', icon: <SchemaIcon /> },
+  { label: 'Logger Insights', icon: <PolicyIcon /> },
   { label: 'Publish', icon: <PublishIcon /> },
 ];
 

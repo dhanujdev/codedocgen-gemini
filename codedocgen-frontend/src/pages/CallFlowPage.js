@@ -1,11 +1,88 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, Paper, List, ListItem, ListItemText, Divider, CircularProgress, Alert } from '@mui/material';
 import DiagramViewer from '../components/DiagramViewer';
+import FlowExplorer from '../components/FlowExplorer.tsx';
 
 const BACKEND_STATIC_BASE_URL = process.env.REACT_APP_BACKEND_BASE_URL || 'http://localhost:8080';
 
+const generateFlowDisplayName = (signature) => {
+  if (!signature || typeof signature !== 'string') return "Unknown Flow";
+
+  // Standard Java method signature: com.package.Class.method(params) or Class.method(params)
+  // Or constructor: com.package.Class.<init>(params)
+  // Regex breakdown:
+  // ^(?:([\w$.<>]+)\.)? : Optionally matches a fully qualified class name ending with a dot. $ matches literal $ in class/method names
+  // ([\w$<>]+)           : Matches the method name (can include $ for inner classes or <> for generics if part of name like special scala methods, though typically <init> or <clinit>)
+  // \((.*?)\)$            : Matches parameters within parentheses at the end. (Changed from .* to .*?)
+  const methodMatch = signature.match(/^(?:([\w$.<>]+)\.)?([\w$<>]+)\((.*?)\)$/);
+
+  if (!methodMatch) {
+    // Fallback for non-standard signatures or simple names
+    if (signature.includes('(') && signature.includes(')')) return signature; // Already somewhat formatted
+    const spacedName = signature.replace(/([A-Z])/g, ' $1').trim();
+    const finalName = spacedName.charAt(0).toUpperCase() + spacedName.slice(1);
+    return finalName.replace(/_/g, ' ');
+  }
+
+  const classFqnOrNull = methodMatch[1];
+  const methodName = methodMatch[2];
+  const paramsString = methodMatch[3];
+
+  const simplifyType = (fullType) => {
+    if (!fullType) return '';
+    // Simplifies types like java.util.List<com.example.MyClass> to List<MyClass>
+    // Also handles arrays like java.lang.String[] to String[]
+    let simplified = fullType.replace(/([a-zA-Z0-9_]+\\.)+([a-zA-Z0-9_$\\<\\>\\[\\]]+)/g, '$2'); // Outer types
+    simplified = simplified.replace(/<([^>]+)>/g, (match, inner) => { // Generic parameters
+        const innerSimplified = inner.split(',')
+            .map(part => part.trim().replace(/([a-zA-Z0-9_]+\\.)+([a-zA-Z0-9_$\\<\\>\\[\\]]+)/g, '$2'))
+            .join(', ');
+        return `<${innerSimplified}>`;
+    });
+    return simplified;
+  };
+
+  const processParams = (pString) => {
+    if (!pString) return "";
+    return pString.split(',')
+      .map(p => p.trim())
+      .filter(p => p)
+      .map(p => {
+        // Match "type name" or just "type"
+        // Handles types with spaces like "unsigned int" or generics "Map<String, String>"
+        const parts = p.match(/^(.*?\s+)?([\w$]+)(\[\])*$/); // Changed (.*\s+)? to (.*?\s+)?
+        if (parts) {
+            const typeCandidate = (parts[1] || "").trim(); // Everything before the last word
+            const nameOrLastPartOfType = parts[2];
+            const arrayBrackets = parts[3] || "";
+
+
+            if (typeCandidate) { // Likely "type name[]" or "type name"
+                return `${simplifyType(typeCandidate)} ${nameOrLastPartOfType}${arrayBrackets}`;
+            } else { // Likely just "type[]" or "type"
+                 return `${simplifyType(nameOrLastPartOfType)}${arrayBrackets}`;
+            }
+        }
+        return simplifyType(p); // Fallback for complex cases not caught by regex
+      }).join(', ');
+  };
+
+  const processedParams = processParams(paramsString);
+
+  if (methodName === "<init>") {
+    const className = classFqnOrNull ? classFqnOrNull.substring(classFqnOrNull.lastIndexOf('.') + 1) : "Object";
+    return `new ${className}(${processedParams})`;
+  }
+  if (methodName === "<clinit>") {
+    const className = classFqnOrNull ? classFqnOrNull.substring(classFqnOrNull.lastIndexOf('.') + 1) : "";
+    return `${className} static initializer`.trim();
+  }
+
+  return `${methodName}(${processedParams})`;
+};
+
 const CallFlowPage = ({ analysisResult, repoName }) => {
-  const [displayableDiagrams, setDisplayableDiagrams] = useState([]);
+  const [displayableDiagramsAndFlows, setDisplayableDiagramsAndFlows] = useState([]);
   const [pageIsLoading, setPageIsLoading] = useState(true);
   const [message, setMessage] = useState('');
 
@@ -13,7 +90,7 @@ const CallFlowPage = ({ analysisResult, repoName }) => {
     console.log('[CallFlowPage] Received analysisResult:', analysisResult);
     setPageIsLoading(true);
     setMessage('');
-    setDisplayableDiagrams([]);
+    setDisplayableDiagramsAndFlows([]);
 
     if (!analysisResult) {
       setMessage('No analysis data available. Please analyze a repository first.');
@@ -22,101 +99,98 @@ const CallFlowPage = ({ analysisResult, repoName }) => {
     }
 
     let collected = [];
-    // Correctly access .diagrams and .sequenceDiagrams from the analysisResult object
     const { diagrams: generalDiagramMap, sequenceDiagrams: specificSequenceDiagrams, callFlows: rawCallFlows } = analysisResult;
 
-    console.log('[CallFlowPage] Extracted generalDiagramMap:', generalDiagramMap);
-    console.log('[CallFlowPage] Extracted specificSequenceDiagrams:', specificSequenceDiagrams);
-    console.log('[CallFlowPage] Extracted rawCallFlows:', rawCallFlows);
-
-    if (generalDiagramMap) {
-      Object.entries(generalDiagramMap).forEach(([type, url]) => {
-        if (type && (type.toUpperCase() === 'SEQUENCE_DIAGRAM' || type.toUpperCase().includes('SEQUENCE'))) {
-          const key = `seq-from-general-${type}`;
-          const title = type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-          collected.push({
-            key: key,
-            title: `${title} (from general map)`,
-            url: `${BACKEND_STATIC_BASE_URL}${url}`,
-            type: type
-          });
-        }
-      });
-    }
-
+    // Process specific sequence diagrams and their raw flows first
     if (specificSequenceDiagrams) {
       Object.entries(specificSequenceDiagrams).forEach(([fqn, url]) => {
-        const key = `seq-from-specific-${fqn}`;
-        const simpleName = fqn.includes('.') ? fqn.substring(fqn.lastIndexOf('.') + 1) : fqn;
-        const title = `Call Flow: ${simpleName}`;
+        const displayName = generateFlowDisplayName(fqn);
+        const flowSteps = rawCallFlows && rawCallFlows[fqn] ? rawCallFlows[fqn] : [];
         collected.push({
-          key: key,
-          title: title,
-          originalTitle: `Sequence: ${fqn}`,
-          url: `${BACKEND_STATIC_BASE_URL}${url}`,
-          type: 'IMAGE',
-          rawFlow: rawCallFlows && rawCallFlows[fqn] ? rawCallFlows[fqn] : []
+          key: `flow-${fqn}`,
+          diagramTitle: `Sequence Diagram: ${displayName}`,
+          diagramUrl: `${BACKEND_STATIC_BASE_URL}${url}`,
+          diagramType: 'IMAGE',
+          flowDataForExplorer: [
+            {
+              name: `Detailed Steps for: ${displayName}`,
+              description: `Call flow starting from ${fqn}`,
+              steps: flowSteps 
+            }
+          ]
         });
       });
     }
+
+    // Add other sequence diagrams from the general map if they weren't already processed
+    if (generalDiagramMap) {
+      Object.entries(generalDiagramMap).forEach(([type, url]) => {
+        if (type && (type.toUpperCase() === 'SEQUENCE_DIAGRAM' || type.toUpperCase().includes('SEQUENCE'))) {
+          // Check if this diagram (based on URL) was already added from specificSequenceDiagrams
+          const alreadyAdded = collected.some(c => c.diagramUrl === `${BACKEND_STATIC_BASE_URL}${url}`);
+          if (!alreadyAdded) {
+            const title = type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            collected.push({
+              key: `general-seq-${type}`,
+              diagramTitle: `${title} (General)`,
+              diagramUrl: `${BACKEND_STATIC_BASE_URL}${url}`,
+              diagramType: type, 
+              flowDataForExplorer: [] // No specific raw flow steps for these general diagrams usually
+            });
+          }
+        }
+      });
+    }
     
-    console.log('[CallFlowPage] Collected sequence diagrams:', collected);
+    console.log('[CallFlowPage] Collected diagrams and flows:', collected);
 
     if (collected.length > 0) {
-      setDisplayableDiagrams(collected);
+      setDisplayableDiagramsAndFlows(collected);
     } else {
-      setMessage('No sequence diagrams (call flows) were found or generated for this repository.');
+      setMessage('No sequence diagrams or call flows were found or generated for this repository.');
     }
     setPageIsLoading(false);
 
-  }, [analysisResult]); // Effect runs when analysisResult changes
+  }, [analysisResult]);
 
-  if (!repoName && !analysisResult) { // Show this only if no repo context at all
+  if (!repoName && !analysisResult) {
     return <Typography sx={{ fontFamily: 'Quicksand', p:2 }}>Please analyze a repository first.</Typography>;
   }
   
   return (
     <Box sx={{ fontFamily: 'Quicksand', width: '100%' }}>
       <Typography variant="h4" sx={{ fontWeight: 700, color: '#4f46e5', mb: 2, fontFamily: 'Quicksand' }}>
-        Call Flow Diagrams for {repoName || (analysisResult && analysisResult.projectName) || 'Project'}
+        Call Flow Analysis for {repoName || (analysisResult && analysisResult.projectName) || 'Project'}
       </Typography>
 
       {pageIsLoading ? (
         <CircularProgress />
       ) : message ? (
         <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}><Alert severity="info">{message}</Alert></Paper>
-      ) : displayableDiagrams.length > 0 ? (
+      ) : displayableDiagramsAndFlows.length > 0 ? (
         <List>
-          {displayableDiagrams.map((diag, index) => (
-            <React.Fragment key={diag.key}>
+          {displayableDiagramsAndFlows.map((item, index) => (
+            <React.Fragment key={item.key}>
               <ListItem>
                 <ListItemText 
-                  primary={diag.title} 
+                  primary={item.diagramTitle} 
                   primaryTypographyProps={{variant: 'h6', fontFamily: 'Quicksand'}}
                 />
               </ListItem>
               <Paper elevation={1} sx={{ p: 2, mb: 2, borderRadius: 2, border: '1px solid #eee' }}>
-                <DiagramViewer diagram={diag} />
-                {diag.rawFlow && diag.rawFlow.length > 0 && (
-                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed #ccc' }}>
-                    <Typography variant="subtitle2" sx={{ fontFamily: 'Quicksand', fontWeight: 'bold', mb:1 }}>Raw Call Steps:</Typography>
-                    <List dense sx={{ maxHeight: 200, overflow: 'auto', background: '#f9f9f9', borderRadius: 1, p:1}}>
-                      {diag.rawFlow.map((step, stepIndex) => (
-                        <ListItem key={`${diag.key}-step-${stepIndex}`} sx={{py: 0.2}}>
-                          <ListItemText primary={`${stepIndex + 1}. ${step}`} primaryTypographyProps={{fontFamily: 'monospace', fontSize: '0.8rem'}} />
-                        </ListItem>
-                      ))}
-                    </List>
+                {item.diagramUrl && <DiagramViewer diagram={{ url: item.diagramUrl, type: item.diagramType, title: item.diagramTitle}} />}
+                {item.flowDataForExplorer && item.flowDataForExplorer.length > 0 && (
+                  <Box sx={{ mt: 2, pt: 2, borderTop: item.diagramUrl ? '1px dashed #ccc' : 'none' }}>
+                    <FlowExplorer flows={item.flowDataForExplorer} />
                   </Box>
                 )}
               </Paper>
-              {index < displayableDiagrams.length - 1 && <Divider sx={{ my: 2 }} />}
+              {index < displayableDiagramsAndFlows.length - 1 && <Divider sx={{ my: 2 }} />}
             </React.Fragment>
           ))}
         </List>
       ) : (
-        // This case should ideally be caught by the message state, but as a fallback:
-        <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}><Alert severity="info">No call flow diagrams to display.</Alert></Paper>
+        <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}><Alert severity="info">No call flow diagrams or detailed steps to display.</Alert></Paper>
       )}
     </Box>
   );

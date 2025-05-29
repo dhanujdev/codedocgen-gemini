@@ -246,7 +246,16 @@ const getElementDetailsFromXSD = (elementQName, wsdlXmlDoc, parsedXsdDocs, recur
                             });
                         } else if (nameAttr) {
                             // TODO: Future enhancement - if typeAttr refers to a global complexType, expand it.
+                            // This would involve:
+                            // 1. Parsing the typeAttr (e.g., "ns:MyCustomType") to get namespace and local name.
+                            // 2. Looking up the namespace URI from the WSDL/XSD imports.
+                            // 3. Searching all parsed XSD documents for a global <xsd:complexType name="MyCustomType"> or <xsd:simpleType name="MyCustomType">
+                            //    matching the target namespace.
+                            // 4. If found, recursively call a function similar to getElementDetailsFromXSD or a new function
+                            //    (e.g., getTypeDetailsFromXSD) to parse its structure (sequence, choice, attributes etc.).
+                            // 5. This needs careful handling of recursion depth and already visited types to prevent infinite loops.
                             // For now, relies on the type being simple or the complexType being inline for further expansion of attributes/elements.
+                            // Acknowledged as a complex feature for future iteration.
                             details.push({
                                 name: nameAttr,
                                 type: typeAttr || 'xs:string',
@@ -360,6 +369,7 @@ const ApiSpecsPage = ({ analysisResult, repoName }) => {
   const [derivedSpecObject, setDerivedSpecObject] = useState(null);
   const [derivedOpenApiStringError, setDerivedOpenApiStringError] = useState(false);
   const [actualWsdlForProcessing, setActualWsdlForProcessing] = useState(null);
+  const [detailedSoapEndpoints, setDetailedSoapEndpoints] = useState([]); // New state for annotation-based SOAP details
 
   useEffect(() => {
     if (!analysisResult) {
@@ -368,13 +378,23 @@ const ApiSpecsPage = ({ analysisResult, repoName }) => {
       setDerivedSpecObject(null);
       setDerivedOpenApiStringError(false);
       setActualWsdlForProcessing(null);
+      setDetailedSoapEndpoints([]); // Reset new state
       return;
     }
 
-    const { openApiSpec, wsdlFilesContent, projectType, xsdFilesContent } = analysisResult;
+    const { openApiSpec, wsdlFilesContent, projectType, xsdFilesContent, endpoints } = analysisResult; // Added endpoints
     let wsdlStringToProcess = null;
 
     console.log('[ApiSpecsPage] useEffect: Received analysisResult.xsdFilesContent:', xsdFilesContent ? JSON.parse(JSON.stringify(xsdFilesContent)) : xsdFilesContent);
+    
+    // Populate detailedSoapEndpoints from analysisResult.endpoints
+    if (endpoints && Array.isArray(endpoints)) {
+      const soapEndpoints = endpoints.filter(ep => ep.type === 'SOAP');
+      setDetailedSoapEndpoints(soapEndpoints);
+      console.log('[ApiSpecsPage] useEffect: Filtered SOAP endpoints:', soapEndpoints);
+    } else {
+      setDetailedSoapEndpoints([]);
+    }
 
     if (wsdlFilesContent && typeof wsdlFilesContent === 'object' && Object.keys(wsdlFilesContent).length > 0) {
       const firstWsdlFile = Object.keys(wsdlFilesContent)[0];
@@ -497,53 +517,95 @@ const ApiSpecsPage = ({ analysisResult, repoName }) => {
         <Paper elevation={2} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
           <Typography variant="h6" gutterBottom sx={{ fontFamily: 'Quicksand' }}>WSDL Operations</Typography>
           <List>
-            {parsedWsdlOperations.map((op, index) => (
-              <React.Fragment key={op.name + index}>
-                <ListItem alignItems="flex-start">
-                  <ListItemText
-                    primary={<Typography variant="subtitle1" sx={{ fontWeight: 'bold', fontFamily: 'Quicksand' }}>{op.name}</Typography>}
-                    secondaryTypographyProps={{ component: 'div', fontFamily: 'Quicksand' }}
-                    secondary={
-                      <>
-                        <Typography component="div" variant="body2" color="text.primary">
-                          Input Message: <Chip label={op.inputMessageName || 'N/A'} size="small" variant="outlined" />
-                          {op.inputPart && (
-                            <Typography component="div" variant="caption" sx={{ ml: 2, mt: 0.5, fontFamily: 'Quicksand' }}>
-                              ↳ Part: <Chip label={`${op.inputPart.name} (Element: ${op.inputPart.element})`} size="small" variant="outlined" />
-                              {op.inputElementDetails && op.inputElementDetails.length > 0 && (
-                                <List dense sx={{ml: 2, mt:0.5}}>
-                                  {op.inputElementDetails.map((detail, idx) => (
-                                    <ElementDetailItem key={`input-${op.name}-${idx}`} detail={detail} />
-                                  ))}
-                                </List>
+            {parsedWsdlOperations.map((op, index) => {
+              const matchedEndpoint = detailedSoapEndpoints.find(ep => 
+                ep.methodName === op.name || 
+                (ep.path && op.name && ep.path.toLowerCase().includes(op.name.toLowerCase()))
+              );
+              return (
+                <React.Fragment key={op.name + index}>
+                  <ListItem alignItems="flex-start">
+                    <ListItemText
+                      primary={<Typography variant="subtitle1" sx={{ fontWeight: 'bold', fontFamily: 'Quicksand' }}>{op.name}</Typography>}
+                      secondaryTypographyProps={{ component: 'div', fontFamily: 'Quicksand' }}
+                      secondary={
+                        <>
+                          {matchedEndpoint && (
+                            <Paper elevation={0} sx={{ p: 1, mb: 1, backgroundColor: '#f9f9f9', borderRadius: 1}}>
+                              <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', color: '#3f51b5' }}>
+                                Annotation-derived Details:
+                              </Typography>
+                              {matchedEndpoint.className && <Typography variant="caption" display="block">Class: {matchedEndpoint.className}</Typography>}
+                              {matchedEndpoint.methodName && matchedEndpoint.methodName !== op.name && <Typography variant="caption" display="block">Method: {matchedEndpoint.methodName}</Typography>}
+                              {matchedEndpoint.serviceName && <Typography variant="caption" display="block">Service Name: {matchedEndpoint.serviceName}</Typography>}
+                              {matchedEndpoint.portName && <Typography variant="caption" display="block">Port Name: {matchedEndpoint.portName}</Typography>}
+                              {matchedEndpoint.targetNamespace && <Typography variant="caption" display="block">Target Namespace: {matchedEndpoint.targetNamespace}</Typography>}
+                              {matchedEndpoint.soapAction && <Typography variant="caption" display="block">SOAP Action: <Chip label={matchedEndpoint.soapAction} size="small" /></Typography>}
+                              {matchedEndpoint.style && <Typography variant="caption" display="block">Style: {matchedEndpoint.style}</Typography>}
+                              {matchedEndpoint.use && <Typography variant="caption" display="block">Use: {matchedEndpoint.use}</Typography>}
+                              {matchedEndpoint.parameterStyle && <Typography variant="caption" display="block">Parameter Style: {matchedEndpoint.parameterStyle}</Typography>}
+                              {matchedEndpoint.headers && Object.keys(matchedEndpoint.headers).length > 0 && (
+                                  <Box mt={0.5}>
+                                      <Typography variant="caption" sx={{fontWeight: 'bold'}}>Headers:</Typography>
+                                      <List dense disablePadding sx={{pl:1}}>
+                                          {Object.entries(matchedEndpoint.headers).map(([key, value]) => (
+                                              <ListItem key={key} sx={{p:0}}>
+                                                  <ListItemText primaryTypographyProps={{variant: 'caption'}} primary={`${key}: ${value}`} />
+                                              </ListItem>
+                                          ))}
+                                      </List>
+                                  </Box>
                               )}
-                            </Typography>
+                              {matchedEndpoint.requestWrapperName && <Typography variant="caption" display="block">Request Wrapper: {matchedEndpoint.requestWrapperName} (Class: {matchedEndpoint.requestWrapperClassName || 'N/A'})</Typography>}
+                              {matchedEndpoint.responseWrapperName && <Typography variant="caption" display="block">Response Wrapper: {matchedEndpoint.responseWrapperName} (Class: {matchedEndpoint.responseWrapperClassName || 'N/A'})</Typography>}
+                              {matchedEndpoint.wsdlUrl && <Typography variant="caption" display="block">WSDL Location (from annotation): <Link href={matchedEndpoint.wsdlUrl} target="_blank">{matchedEndpoint.wsdlUrl}</Link></Typography>}
+                            </Paper>
                           )}
-                        </Typography>
-                        
-                        <Typography component="div" variant="body2" color="text.primary" sx={{mt:1}}>
-                          Output Message: <Chip label={op.outputMessageName || 'N/A'} size="small" variant="outlined" />
-                           {op.outputPart && (
-                            <Typography component="div" variant="caption" sx={{ ml: 2, mt: 0.5, fontFamily: 'Quicksand' }}>
-                              ↳ Part: <Chip label={`${op.outputPart.name} (Element: ${op.outputPart.element})`} size="small" variant="outlined" />
-                               {op.outputElementDetails && op.outputElementDetails.length > 0 && (
-                                <List dense sx={{ml: 2, mt:0.5}}>
-                                  {op.outputElementDetails.map((detail, idx) => (
-                                   <ElementDetailItem key={`output-${op.name}-${idx}`} detail={detail} />
-                                  ))}
-                                </List>
-                              )}
-                            </Typography>
+                          <Typography component="div" variant="body2" color="text.primary">
+                            Input Message: <Chip label={op.inputMessageName || 'N/A'} size="small" variant="outlined" />
+                            {op.inputPart && (
+                              <Typography component="div" variant="caption" sx={{ ml: 2, mt: 0.5, fontFamily: 'Quicksand' }}>
+                                ↳ Part: <Chip label={`${op.inputPart.name} (Element: ${op.inputPart.element})`} size="small" variant="outlined" />
+                                {op.inputElementDetails && op.inputElementDetails.length > 0 && (
+                                  <List dense sx={{ml: 2, mt:0.5}}>
+                                    {op.inputElementDetails.map((detail, idx) => (
+                                      <ElementDetailItem key={`input-${op.name}-${idx}`} detail={detail} />
+                                    ))}
+                                  </List>
+                                )}
+                              </Typography>
+                            )}
+                          </Typography>
+                          
+                          <Typography component="div" variant="body2" color="text.primary" sx={{mt:1}}>
+                            Output Message: <Chip label={op.outputMessageName || 'N/A'} size="small" variant="outlined" />
+                             {op.outputPart && (
+                              <Typography component="div" variant="caption" sx={{ ml: 2, mt: 0.5, fontFamily: 'Quicksand' }}>
+                                ↳ Part: <Chip label={`${op.outputPart.name} (Element: ${op.outputPart.element})`} size="small" variant="outlined" />
+                                 {op.outputElementDetails && op.outputElementDetails.length > 0 && (
+                                  <List dense sx={{ml: 2, mt:0.5}}>
+                                    {op.outputElementDetails.map((detail, idx) => (
+                                     <ElementDetailItem key={`output-${op.name}-${idx}`} detail={detail} />
+                                    ))}
+                                  </List>
+                                )}
+                              </Typography>
+                            )}
+                          </Typography>
+                          {op.documentation && <Typography variant="caption" display="block" sx={{ mt: 1, color: 'text.secondary', fontStyle: 'italic' }}>Documentation: {op.documentation}</Typography>}
+                          {!matchedEndpoint && (
+                              <Typography variant="caption" display="block" sx={{mt: 1, color: 'text.secondary', fontStyle: 'italic' }}>
+                                  (No specific annotation-derived metadata found for this WSDL operation name)
+                              </Typography>
                           )}
-                        </Typography>
-                        {op.documentation && <Typography variant="caption" display="block" sx={{ mt: 1, color: 'text.secondary', fontStyle: 'italic' }}>Documentation: {op.documentation}</Typography>}
-                      </>
-                    }
-                  />
-                </ListItem>
-                {index < parsedWsdlOperations.length - 1 && <Divider variant="inset" component="li" />}
-              </React.Fragment>
-            ))}
+                        </>
+                      }
+                    />
+                  </ListItem>
+                  {index < parsedWsdlOperations.length - 1 && <Divider variant="inset" component="li" />}
+                </React.Fragment>
+              )}
+            )}
           </List>
           {actualWsdlForProcessing && (
              <details style={{ marginTop: '20px', cursor: 'pointer' }}>
@@ -568,6 +630,57 @@ const ApiSpecsPage = ({ analysisResult, repoName }) => {
         <Paper elevation={2} sx={{ p: 3, borderRadius: 2, '& .swagger-ui .topbar': { display: 'none' } }}>
           <Typography variant="h6" gutterBottom sx={{ fontFamily: 'Quicksand' }}>Embedded OpenAPI Specification</Typography>
           <SwaggerUI spec={derivedSpecObject} />
+        </Paper>
+      )
+      : detailedSoapEndpoints.length > 0 ? (
+        <Paper elevation={2} sx={{ p:3, mb:3, borderRadius: 2}}>
+            <Typography variant="h6" gutterBottom sx={{ fontFamily: 'Quicksand' }}>SOAP Endpoints (from Annotations)</Typography>
+            <Alert severity="info" sx={{ mb: 2, fontFamily: 'Quicksand' }}>
+                Displaying SOAP endpoints identified from code annotations. This section appears when WSDL operations could not be parsed or are not available.
+            </Alert>
+            <List>
+                {detailedSoapEndpoints.map((ep, index) => (
+                    <React.Fragment key={`annotated-soap-${index}`}>
+                        <ListItem alignItems="flex-start">
+                            <ListItemText
+                                primary={<Typography variant="subtitle1" sx={{ fontWeight: 'bold', fontFamily: 'Quicksand' }}>{ep.methodName || ep.path || 'Unnamed SOAP Endpoint'}</Typography>}
+                                secondaryTypographyProps={{ component: 'div', fontFamily: 'Quicksand' }}
+                                secondary={
+                                    <Paper elevation={0} sx={{ p: 1, mt:0.5, backgroundColor: '#f9f9f9', borderRadius: 1}}>
+                                        {ep.className && <Typography variant="caption" display="block">Class: {ep.className}</Typography>}
+                                        {ep.serviceName && <Typography variant="caption" display="block">Service Name: {ep.serviceName}</Typography>}
+                                        {ep.portName && <Typography variant="caption" display="block">Port Name: {ep.portName}</Typography>}
+                                        {ep.targetNamespace && <Typography variant="caption" display="block">Target Namespace: {ep.targetNamespace}</Typography>}
+                                        {ep.soapAction && <Typography variant="caption" display="block">SOAP Action: <Chip label={ep.soapAction} size="small" /></Typography>}
+                                        {ep.style && <Typography variant="caption" display="block">Style: {ep.style}</Typography>}
+                                        {ep.use && <Typography variant="caption" display="block">Use: {ep.use}</Typography>}
+                                        {ep.parameterStyle && <Typography variant="caption" display="block">Parameter Style: {ep.parameterStyle}</Typography>}
+                                        {ep.headers && Object.keys(ep.headers).length > 0 && (
+                                            <Box mt={0.5}>
+                                                <Typography variant="caption" sx={{fontWeight: 'bold'}}>Headers:</Typography>
+                                                <List dense disablePadding sx={{pl:1}}>
+                                                    {Object.entries(ep.headers).map(([key, value]) => (
+                                                        <ListItem key={key} sx={{p:0}}>
+                                                            <ListItemText primaryTypographyProps={{variant: 'caption'}} primary={`${key}: ${value}`} />
+                                                        </ListItem>
+                                                    ))}
+                                                </List>
+                                            </Box>
+                                        )}
+                                        {ep.requestBodyType && <Typography variant="caption" display="block">Request Type: {ep.requestBodyType}</Typography>}
+                                        {ep.responseBodyType && <Typography variant="caption" display="block">Response Type: {ep.responseBodyType}</Typography>}
+                                        {ep.requestWrapperName && <Typography variant="caption" display="block">Request Wrapper: {ep.requestWrapperName} (Class: {ep.requestWrapperClassName || 'N/A'})</Typography>}
+                                        {ep.responseWrapperName && <Typography variant="caption" display="block">Response Wrapper: {ep.responseWrapperName} (Class: {ep.responseWrapperClassName || 'N/A'})</Typography>}
+                                        {ep.wsdlUrl && <Typography variant="caption" display="block">WSDL Location (from annotation): <Link href={ep.wsdlUrl} target="_blank">{ep.wsdlUrl}</Link></Typography>}
+                                        {ep.path && <Typography variant="caption" display="block">Path (from annotation): {ep.path}</Typography>}                                        
+                                    </Paper>
+                                }
+                            />
+                        </ListItem>
+                        {index < detailedSoapEndpoints.length - 1 && <Divider variant="inset" component="li" />}
+                    </React.Fragment>
+                ))}
+            </List>
         </Paper>
       )
       : isSpringBootProject ? (
