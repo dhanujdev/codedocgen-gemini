@@ -118,7 +118,48 @@ public class ProjectDetectorServiceImpl implements ProjectDetectorService {
                 logger.error("Error reading pom.xml for Spring Boot version detection in {}: {}", projectDir.getAbsolutePath(), e.getMessage());
             }
         }
-        // TODO: Add similar logic for build.gradle/build.gradle.kts if necessary
+
+        // Attempt to find Spring Boot version from build.gradle or build.gradle.kts
+        File gradleFile = new File(projectDir, "build.gradle");
+        File gradleKtsFile = new File(projectDir, "build.gradle.kts");
+        File targetGradleFile = gradleFile.exists() ? gradleFile : (gradleKtsFile.exists() ? gradleKtsFile : null);
+
+        if (targetGradleFile != null) {
+            try {
+                String content = Files.readString(targetGradleFile.toPath());
+                // Regex for id 'org.springframework.boot' version 'x.y.z'
+                // Target Java String: "(?:id[\\s\\(]['\\\"]org\\.springframework\\.boot['\\\"]\\)?(?:\\s*version\\s*['\\\"](.*?)['\\\"'])?)
+                Pattern pluginVersionPattern = Pattern.compile("(?:id[\\s\\(]['\\\"']org\\.springframework\\.boot['\\\"']\\)?(?:\\s*version\\s*['\\\"'](.*?)['\\\"'])?)", Pattern.CASE_INSENSITIVE);
+                Matcher pluginMatcher = pluginVersionPattern.matcher(content);
+                if (pluginMatcher.find() && pluginMatcher.group(1) != null) {
+                    logger.info("Detected Spring Boot version {} (from Gradle plugin) in {}", pluginMatcher.group(1), projectDir.getAbsolutePath());
+                    return pluginMatcher.group(1);
+                }
+
+                // Regex for springBootVersion = 'x.y.z' or springBootVersion = "x.y.z"
+                // And for ext['springBootVersion'] = 'x.y.z' or ext["springBootVersion"] = "x.y.z"
+                // Target Java String: "(?:ext\\s*\\[['\\\"]springBootVersion['\\\"]\\]\\s*=|springBootVersion\\s*=)\\s*['\\\"](.*?)['\\\"]"
+                Pattern extVersionPattern = Pattern.compile("(?:ext\\s*\\[['\\\"']springBootVersion['\\\"']\\]\\s*=|springBootVersion\\s*=)\\s*['\\\"'](.*?)['\\\"']");
+                Matcher extMatcher = extVersionPattern.matcher(content);
+                if (extMatcher.find()) {
+                    logger.info("Detected Spring Boot version {} (from Gradle ext property) in {}", extMatcher.group(1), projectDir.getAbsolutePath());
+                    return extMatcher.group(1);
+                }
+                
+                // Regex for plugins { id("org.springframework.boot") version "x.y.z" }
+                // Target Java String: "id\\(\\\"org\\.springframework\\.boot\\\"\\)\\s*version\\s*\\\"(.*?)\\\""
+                Pattern kotlinDslPluginPattern = Pattern.compile("id\\(\\\"org\\.springframework\\.boot\\\"\\)\\s*version\\s*\\\"(.*?)\\\"");
+                Matcher kotlinDslMatcher = kotlinDslPluginPattern.matcher(content);
+                if (kotlinDslMatcher.find()) {
+                    logger.info("Detected Spring Boot version {} (from Gradle Kotlin DSL plugin) in {}", kotlinDslMatcher.group(1), projectDir.getAbsolutePath());
+                    return kotlinDslMatcher.group(1);
+                }
+
+            } catch (IOException e) {
+                logger.error("Error reading build.gradle/kts for Spring Boot version detection in {}: {}", projectDir.getAbsolutePath(), e.getMessage());
+            }
+        }
+        // TODO: Add similar logic for build.gradle/build.gradle.kts if necessary - DONE
         logger.warn("Could not determine Spring Boot version for {}", projectDir.getAbsolutePath());
         return null; // Or a default/unknown string
     }

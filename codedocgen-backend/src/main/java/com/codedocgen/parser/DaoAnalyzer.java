@@ -2,14 +2,18 @@ package com.codedocgen.parser;
 
 import com.codedocgen.model.DaoOperationDetail;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
+import com.github.javaparser.ast.expr.NameExpr;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -35,20 +39,46 @@ public class DaoAnalyzer {
     public DaoAnalysisResult analyze(MethodDeclaration methodDeclaration) {
         List<DaoOperationDetail> operations = new ArrayList<>();
         String methodName = methodDeclaration.getNameAsString();
+        Map<String, String> stringVariables = new HashMap<>();
 
         if (methodDeclaration.getBody().isPresent()) {
-            // Look for specific JDBC method calls
+            // 1. Find string variable assignments
+            methodDeclaration.getBody().get().findAll(VariableDeclarator.class).forEach(vd -> {
+                if (vd.getType().asString().equals("String") && vd.getInitializer().isPresent()) {
+                    Expression initializer = vd.getInitializer().get();
+                    if (initializer.isStringLiteralExpr()) {
+                        stringVariables.put(vd.getNameAsString(), initializer.asStringLiteralExpr().getValue());
+                    } else if (initializer.isNameExpr()) {
+                        // Handle assignment from another variable, if that variable is known
+                        String referencedVarName = initializer.asNameExpr().getNameAsString();
+                        if (stringVariables.containsKey(referencedVarName)) {
+                            stringVariables.put(vd.getNameAsString(), stringVariables.get(referencedVarName));
+                        }
+                    }
+                    // Note: Does not handle concatenated strings or method calls returning strings yet.
+                }
+            });
+
+            // 2. Look for specific JDBC method calls
             methodDeclaration.getBody().get().findAll(MethodCallExpr.class).forEach(methodCall -> {
                 String jdbcMethodName = methodCall.getNameAsString();
                 if (JDBC_METHODS.contains(jdbcMethodName) && !methodCall.getArguments().isEmpty()) {
                     Expression firstArg = methodCall.getArgument(0);
+                    String sqlQuery = null;
                     if (firstArg.isStringLiteralExpr()) {
-                        String sqlQuery = firstArg.asStringLiteralExpr().getValue();
-                        if (isPotentiallySql(sqlQuery)) {
-                            addOperationDetail(operations, methodName, sqlQuery);
+                        sqlQuery = firstArg.asStringLiteralExpr().getValue();
+                    } else if (firstArg.isNameExpr()) {
+                        // Check if the argument is a tracked string variable
+                        String varName = firstArg.asNameExpr().getNameAsString();
+                        if (stringVariables.containsKey(varName)) {
+                            sqlQuery = stringVariables.get(varName);
                         }
                     }
-                    // TODO: Handle cases where SQL is in a variable or constructed dynamically
+
+                    if (sqlQuery != null && isPotentiallySql(sqlQuery)) {
+                        addOperationDetail(operations, methodName, sqlQuery);
+                    }
+                    // TODO: Handle cases where SQL is in a variable or constructed dynamically - Partially Addressed
                 }
             });
 

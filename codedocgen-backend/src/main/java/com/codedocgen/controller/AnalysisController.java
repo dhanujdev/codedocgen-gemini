@@ -17,11 +17,14 @@ import org.springframework.web.bind.annotation.*;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.Locale;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 // Import OpenAPI model and ObjectMapper
 // import io.swagger.v3.oas.models.OpenAPI; // No longer injecting OpenAPI directly
@@ -38,6 +41,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import com.codedocgen.parser.CallFlowAnalyzer;
 import com.codedocgen.service.DaoAnalysisService;
 import com.codedocgen.model.DbAnalysisResult;
+import com.codedocgen.model.LogStatement;
+import com.codedocgen.service.LoggerInsightsService;
 
 @RestController
 @RequestMapping("/api/analysis")
@@ -56,6 +61,7 @@ public class AnalysisController {
     private final RestTemplate restTemplate; // Inject RestTemplate
     private final CallFlowAnalyzer callFlowAnalyzer;
     private final DaoAnalysisService daoAnalysisService; // Add DaoAnalysisService
+    private final LoggerInsightsService loggerInsightsService; // Added LoggerInsightsService
 
     @Value("${app.repoStoragePath:/tmp/codedocgen_repos}")
     private String repoStoragePath;
@@ -74,7 +80,8 @@ public class AnalysisController {
                               ObjectMapper objectMapper,
                               RestTemplate restTemplate,
                               CallFlowAnalyzer callFlowAnalyzer,
-                              DaoAnalysisService daoAnalysisService) { // Add DaoAnalysisService
+                              DaoAnalysisService daoAnalysisService, // Add DaoAnalysisService
+                              LoggerInsightsService loggerInsightsService) { // Added LoggerInsightsService
         this.gitService = gitService;
         this.javaParserService = javaParserService;
         this.projectDetectorService = projectDetectorService;
@@ -86,6 +93,7 @@ public class AnalysisController {
         this.restTemplate = restTemplate; // Initialize RestTemplate
         this.callFlowAnalyzer = callFlowAnalyzer;
         this.daoAnalysisService = daoAnalysisService; // Initialize DaoAnalysisService
+        this.loggerInsightsService = loggerInsightsService; // Initialize LoggerInsightsService
     }
 
     @PostMapping("/analyze")
@@ -94,6 +102,7 @@ public class AnalysisController {
         if (repoUrl == null || repoUrl.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(null); // Or a custom error DTO
         }
+        repoUrl = repoUrl.trim();
 
         // Extract project name from URL
         String extractedProjectName;
@@ -258,7 +267,28 @@ public class AnalysisController {
                 // Optionally set an error message in the response for these parts
             }
 
-            // 11. Finalize and return response
+            // 11. Get Logger Insights
+            logger.info("Attempting to get logger insights from: {}", localRepoPath.getAbsolutePath());
+            try {
+                // Determine the path for log analysis (e.g., src/main/java or root)
+                 Path potentialSrcPath = localRepoPath.toPath().resolve("src/main/java");
+                 String effectivePathForLogAnalysis = localRepoPath.getAbsolutePath();
+                 if (Files.exists(potentialSrcPath) && Files.isDirectory(potentialSrcPath)){
+                     effectivePathForLogAnalysis = potentialSrcPath.toString();
+                     logger.info("Using src/main/java as source for log analysis: {}", effectivePathForLogAnalysis);
+                 } else {
+                      logger.info("src/main/java not found, analyzing entire repository for logs: {}", effectivePathForLogAnalysis);
+                 }
+                List<LogStatement> logStatements = loggerInsightsService.getLogInsights(effectivePathForLogAnalysis);
+                response.setLogStatements(logStatements);
+                logger.info("Successfully retrieved {} log statements.", logStatements.size());
+            } catch (Exception e) {
+                logger.error("Error fetching logger insights: {}", e.getMessage(), e);
+                // Optionally add a warning or error to the response about log insights failing
+                 response.setLogStatements(new ArrayList<>()); // Set empty list on error
+            }
+
+            // 12. Finalize and return response
             logger.info("Completed analysis for repository: {}", repoUrl);
             return ResponseEntity.ok(response);
 

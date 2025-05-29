@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Optional;
 
 @Service
 public class DocumentationServiceImpl implements DocumentationService {
@@ -106,7 +107,13 @@ public class DocumentationServiceImpl implements DocumentationService {
                         if (method.getExceptionsThrown() != null && !method.getExceptionsThrown().isEmpty()) {
                             markdownBuilder.append("  - Throws: ").append(method.getExceptionsThrown().stream().map(e -> "`" + e + "`").collect(Collectors.joining(", "))).append("\n");
                         }
-                        // TODO: Add called methods / external calls if that data is available
+                        // TODO: Add called methods / external calls if that data is available - DONE
+                        if (method.getCalledMethods() != null && !method.getCalledMethods().isEmpty()) {
+                            markdownBuilder.append("  - Called Methods: ").append(method.getCalledMethods().stream().map(cm -> "`" + cm + "`").collect(Collectors.joining(", "))).append("\n");
+                        }
+                        if (method.getExternalCalls() != null && !method.getExternalCalls().isEmpty()) {
+                            markdownBuilder.append("  - External Calls: ").append(method.getExternalCalls().stream().map(ec -> "`" + ec + "`").collect(Collectors.joining(", "))).append("\n");
+                        }
                         markdownBuilder.append("\n"); 
                     }
                 } else {
@@ -245,8 +252,48 @@ public class DocumentationServiceImpl implements DocumentationService {
         summary.append("Project Name: ").append(analysisResult.getProjectName()).append(". ");
         summary.append("Type: ").append(analysisResult.getProjectType()).append(". ");
         
+        // Tech stack details
+        List<String> techStack = new ArrayList<>();
+        if (analysisResult.getProjectType() != null && !analysisResult.getProjectType().equals("Raw Source/Unknown")) {
+            techStack.add(analysisResult.getProjectType());
+        }
+
+        if (analysisResult.isSpringBootProject()) {
+            techStack.add("Spring Boot" + (analysisResult.getSpringBootVersion() != null && !analysisResult.getSpringBootVersion().isEmpty() ? " (" + analysisResult.getSpringBootVersion() + ")" : ""));
+        }
+
+        // Infer other technologies based on endpoint types or class types if possible (example)
+        boolean hasRest = false;
+        boolean hasSoap = false;
+        if (analysisResult.getEndpoints() != null) {
+            for (EndpointMetadata endpoint : analysisResult.getEndpoints()) {
+                if ("REST".equalsIgnoreCase(endpoint.getType())) hasRest = true;
+                if ("SOAP".equalsIgnoreCase(endpoint.getType())) hasSoap = true;
+            }
+        }
+        if (hasRest) techStack.add("REST APIs");
+        if (hasSoap) techStack.add("SOAP Web Services");
+
+        // Check for common class types like 'repository' or 'service'
+        boolean hasRepositories = false;
+        boolean hasServices = false;
+        if(analysisResult.getClasses() != null){
+            for(ClassMetadata cmd : analysisResult.getClasses()){
+                if("repository".equalsIgnoreCase(cmd.getType())) hasRepositories = true;
+                if("service".equalsIgnoreCase(cmd.getType())) hasServices = true;
+            }
+        }
+        if(hasRepositories) techStack.add("Data Repositories (e.g., Spring Data)");
+        if(hasServices) techStack.add("Service Layer");
+
+
+        if (!techStack.isEmpty()) {
+            summary.append("Key Technologies: ").append(String.join(", ", techStack)).append(". ");
+        }
+
         if (analysisResult.isSpringBootProject() && analysisResult.getSpringBootVersion() != null && !analysisResult.getSpringBootVersion().isEmpty()) {
-            summary.append("Spring Boot Version: ").append(analysisResult.getSpringBootVersion()).append(". ");
+            // This information is already part of techStack, so commenting out the specific line for Spring Boot version here to avoid redundancy.
+            // summary.append("Spring Boot Version: ").append(analysisResult.getSpringBootVersion()).append(". ");
         } else if (analysisResult.isSpringBootProject()) {
             summary.append("Spring Boot: Yes (version not detected). ");
         } 
@@ -277,7 +324,12 @@ public class DocumentationServiceImpl implements DocumentationService {
         if (analysisResult.getOpenApiSpec() != null && !analysisResult.getOpenApiSpec().isEmpty()){
             summary.append("An OpenAPI (Swagger) specification is available for REST APIs.\n");
         }
-        // TODO: Could be enhanced with more insights, e.g., common libraries, tech stack details.
+        // TODO: Enhance with common libraries, tech stack details - Partially Done (more detailed library detection would require pom/gradle access)
+
+        if (analysisResult.getProjectSummary() != null && !analysisResult.getProjectSummary().isEmpty()) {
+             summary.append("\n\nUser Provided Summary: ").append(analysisResult.getProjectSummary());
+        }
+
         return summary.toString();
     }
     
@@ -321,55 +373,38 @@ public class DocumentationServiceImpl implements DocumentationService {
     public Map<String, String> findAndReadWsdlFiles(File projectDir) {
         Map<String, String> wsdlFilesContent = new HashMap<>();
         if (projectDir == null || !projectDir.isDirectory()) {
-            logger.warn("Project directory is invalid for WSDL file search.");
+            logger.warn("Project directory is null or not a directory. Cannot find WSDL files.");
             return wsdlFilesContent;
         }
 
+        List<Path> searchPaths = new ArrayList<>();
         // Common locations for WSDL files
-        String[] commonDirs = {"src/main/resources/wsdl", "src/main/webapp/WEB-INF/wsdl", "wsdl"};
+        searchPaths.add(projectDir.toPath().resolve("src/main/resources/wsdl"));
+        searchPaths.add(projectDir.toPath().resolve("src/main/resources/META-INF/wsdl"));
+        searchPaths.add(projectDir.toPath().resolve("src/main/resources/service-api-definition")); // For jonashackt/soap-spring-boot-cxf
+        searchPaths.add(projectDir.toPath().resolve("src/main/webapp/WEB-INF/wsdl"));
+        searchPaths.add(projectDir.toPath().resolve("src/main/resources")); // General resources
+        searchPaths.add(projectDir.toPath()); // Project root
 
-        for (String dir : commonDirs) {
-            File wsdlDir = new File(projectDir, dir);
-            if (wsdlDir.exists() && wsdlDir.isDirectory()) {
-                try (Stream<Path> paths = Files.walk(wsdlDir.toPath())) {
-                    paths.filter(Files::isRegularFile)
-                         .filter(path -> path.toString().toLowerCase().endsWith(".wsdl"))
-                         .forEach(path -> {
-                             try {
-                                 String content = Files.readString(path, StandardCharsets.UTF_8);
-                                 // Store relative path as key for better identification
-                                 String relativePath = projectDir.toPath().relativize(path).toString().replace("\\", "/");
-                                 wsdlFilesContent.put(relativePath, content);
-                                 logger.info("Read WSDL file: {}", path.toString());
-                             } catch (IOException e) {
-                                 logger.warn("Failed to read WSDL file {}: {}", path.toString(), e.getMessage());
-                             }
-                         });
+        logger.info("Searching for WSDL files in project: {}", projectDir.getName());
+
+        for (Path dir : searchPaths) {
+            if (Files.isDirectory(dir)) {
+                try (Stream<Path> stream = Files.walk(dir)) {
+                    stream.filter(file -> !Files.isDirectory(file) && file.toString().toLowerCase().endsWith(".wsdl"))
+                          .forEach(wsdlFile -> {
+                              try {
+                                  String content = Files.readString(wsdlFile, StandardCharsets.UTF_8);
+                                  String relativePath = projectDir.toPath().relativize(wsdlFile).toString();
+                                  wsdlFilesContent.put(relativePath, content);
+                                  logger.info("Found and read WSDL file: {}", relativePath);
+                              } catch (IOException e) {
+                                  logger.warn("Could not read WSDL file {}: {}", wsdlFile, e.getMessage());
+                              }
+                          });
                 } catch (IOException e) {
-                    logger.warn("Error walking directory {}: {}", wsdlDir.getAbsolutePath(), e.getMessage());
+                    logger.warn("Error walking directory {} for WSDL files: {}", dir, e.getMessage());
                 }
-            }
-        }
-         // Also search in src/main/resources directly
-        File resourcesDir = new File(projectDir, "src/main/resources");
-        if (resourcesDir.exists() && resourcesDir.isDirectory()) {
-            try (Stream<Path> paths = Files.walk(resourcesDir.toPath(), 1)) { // Max depth 1 to only search current dir
-                paths.filter(Files::isRegularFile)
-                        .filter(path -> path.toString().toLowerCase().endsWith(".wsdl"))
-                        .forEach(path -> {
-                            try {
-                                String content = Files.readString(path, StandardCharsets.UTF_8);
-                                String relativePath = projectDir.toPath().relativize(path).toString().replace("\\", "/");
-                                if (!wsdlFilesContent.containsKey(relativePath)) { // Avoid duplicates if already found
-                                   wsdlFilesContent.put(relativePath, content);
-                                   logger.info("Read WSDL file from resources root: {}", path.toString());
-                                }
-                            } catch (IOException e) {
-                                logger.warn("Failed to read WSDL file {}: {}", path.toString(), e.getMessage());
-                            }
-                        });
-            } catch (IOException e) {
-                logger.warn("Error walking directory {}: {}", resourcesDir.getAbsolutePath(), e.getMessage());
             }
         }
 
@@ -457,5 +492,106 @@ public class DocumentationServiceImpl implements DocumentationService {
             logger.error("Error generating OpenAPI spec from endpoints: {}", e.getMessage(), e);
             return "{}";
         }
+    }
+
+    public List<EndpointMetadata> combineEndpointData(List<EndpointMetadata> annotationEndpoints, List<EndpointMetadata> wsdlEndpoints) {
+        if (wsdlEndpoints == null || wsdlEndpoints.isEmpty()) {
+            return annotationEndpoints != null ? annotationEndpoints : new ArrayList<>();
+        }
+        if (annotationEndpoints == null || annotationEndpoints.isEmpty()) {
+            return wsdlEndpoints;
+        }
+
+        List<EndpointMetadata> combined = new ArrayList<>();
+        Map<String, EndpointMetadata> wsdlMapByTargetNamespaceAndOperation = new HashMap<>();
+
+        for (EndpointMetadata wsdlEp : wsdlEndpoints) {
+            if (wsdlEp.getTargetNamespace() != null && !wsdlEp.getTargetNamespace().isEmpty() &&
+                wsdlEp.getOperationName() != null && !wsdlEp.getOperationName().isEmpty()) {
+                String key = wsdlEp.getTargetNamespace().toLowerCase() + "::" + wsdlEp.getOperationName().toLowerCase();
+                wsdlMapByTargetNamespaceAndOperation.put(key, wsdlEp);
+            } else {
+                 // If TNS or OpName is missing, add WSDL endpoint as is, it cannot be reliably correlated
+                logger.warn("WSDL endpoint for WSDL {} operation {} is missing targetNamespace or operationName, adding as-is.", wsdlEp.getWsdlUrl(), wsdlEp.getOperationName());
+                combined.add(wsdlEp);
+            }
+        }
+        
+        List<EndpointMetadata> annotationEndpointsNotMatched = new ArrayList<>();
+
+        for (EndpointMetadata annEp : annotationEndpoints) {
+            String annTargetNamespace = annEp.getTargetNamespace();
+            String annOperationName = annEp.getOperationName();
+
+            EndpointMetadata matchedWsdlEp = null;
+            if (annTargetNamespace != null && !annTargetNamespace.isEmpty() &&
+                annOperationName != null && !annOperationName.isEmpty()) {
+                String key = annTargetNamespace.toLowerCase() + "::" + annOperationName.toLowerCase();
+                matchedWsdlEp = wsdlMapByTargetNamespaceAndOperation.get(key);
+            }
+
+            if (matchedWsdlEp != null) {
+                logger.info("Matched WSDL endpoint for TNS '{}' operation '{}' with annotation endpoint {}#{}", 
+                            matchedWsdlEp.getTargetNamespace(), matchedWsdlEp.getOperationName(), annEp.getClassName(), annEp.getMethodName());
+                
+                // Merge: Start with annotation endpoint, then selectively override/add from WSDL
+                EndpointMetadata merged = new EndpointMetadata();
+                merged.setClassName(annEp.getClassName());
+                merged.setMethodName(annEp.getMethodName());
+                merged.setHandlerMethod(annEp.getHandlerMethod());
+                merged.setHeaders(annEp.getHeaders()); // Keep Java annotations
+
+                // Details from WSDL
+                merged.setWsdlUrl(matchedWsdlEp.getWsdlUrl());
+                merged.setOperationName(matchedWsdlEp.getOperationName()); // Use WSDL's casing for operation name
+                merged.setTargetNamespace(matchedWsdlEp.getTargetNamespace());
+                merged.setSoapAction(matchedWsdlEp.getSoapAction());
+                merged.setStyle(matchedWsdlEp.getStyle());
+                merged.setUse(matchedWsdlEp.getUse());
+                merged.setPortTypeName(matchedWsdlEp.getPortTypeName());
+                merged.setServiceName(matchedWsdlEp.getServiceName()); // From WSDL Service
+                merged.setPortName(matchedWsdlEp.getPortName());       // From WSDL Port
+                merged.setPath(matchedWsdlEp.getPath()); // Use WSDL derived path
+                merged.setRequestBodyType(matchedWsdlEp.getRequestBodyType()); // WSDL message name
+                merged.setResponseBodyType(matchedWsdlEp.getResponseBodyType()); // WSDL message name
+                
+                // Details from Annotations (if WSDL didn't provide or if annotation is more specific)
+                merged.setConsumes(annEp.getConsumes() != null ? annEp.getConsumes() : matchedWsdlEp.getConsumes());
+                merged.setProduces(annEp.getProduces() != null ? annEp.getProduces() : matchedWsdlEp.getProduces());
+                merged.setType(annEp.getType()); // Should be SOAP from both
+                merged.setHttpMethod(annEp.getHttpMethod()); // Should be SOAP from both
+
+                merged.setParameterStyle(annEp.getParameterStyle() != null ? annEp.getParameterStyle() : matchedWsdlEp.getParameterStyle());
+                merged.setRequestWrapperName(annEp.getRequestWrapperName());
+                merged.setRequestWrapperClassName(annEp.getRequestWrapperClassName());
+                merged.setResponseWrapperName(annEp.getResponseWrapperName());
+                merged.setResponseWrapperClassName(annEp.getResponseWrapperClassName());
+                merged.setHeaders(annEp.getHeaders()); // Use headers from the annotation-derived endpoint metadata
+                merged.setSoapRequestHeaderQNames(annEp.getSoapRequestHeaderQNames()); // from @SoapHeader
+                merged.setPathVariables(annEp.getPathVariables()); // Usually null for SOAP
+                merged.setRequestParameters(annEp.getRequestParameters()); // Usually null for SOAP
+                merged.setHttpStatus(annEp.getHttpStatus()); // Usually null for SOAP
+                merged.setRequestParamDetails(annEp.getRequestParamDetails());
+
+                combined.add(merged);
+                wsdlMapByTargetNamespaceAndOperation.remove(matchedWsdlEp.getTargetNamespace().toLowerCase() + "::" + matchedWsdlEp.getOperationName().toLowerCase()); // Remove from map as it's matched
+            } else {
+                logger.info("No WSDL match for annotation endpoint: {} {}#{} (TNS: {}, Op: {}). Adding as is.",
+                    annEp.getPath(), annEp.getClassName(), annEp.getMethodName(), annEp.getTargetNamespace(), annEp.getOperationName());
+                annotationEndpointsNotMatched.add(annEp);
+            }
+        }
+
+        // Add any WSDL endpoints that were not matched by any annotation endpoint
+        combined.addAll(wsdlMapByTargetNamespaceAndOperation.values());
+        // Add annotation endpoints that were not matched (these might be REST or non-WSDL SOAP)
+        combined.addAll(annotationEndpointsNotMatched);
+
+        logger.info("Combined {} annotation endpoints and {} WSDL endpoints into {} final endpoints.",
+            annotationEndpoints != null ? annotationEndpoints.size() : 0,
+            wsdlEndpoints != null ? wsdlEndpoints.size() : 0,
+            combined.size());
+
+        return combined;
     }
 } 

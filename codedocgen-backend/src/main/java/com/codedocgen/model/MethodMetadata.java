@@ -24,6 +24,11 @@ public class MethodMetadata {
     // Local variable declarations (type and name as 'Type name')
     private List<String> localVariables;
     private List<List<String>> parameterAnnotations; // Annotations for each parameter, in order
+    private List<String> returnTypeAnnotations; // Annotations for the return type
+    
+    // For deeper analysis of bean methods, store the original JavaParser node
+    @com.fasterxml.jackson.annotation.JsonIgnore // Prevent Jackson from trying to serialize this complex AST node
+    private transient com.github.javaparser.ast.body.MethodDeclaration resolvedMethodNode;
     
     // The following fields are likely superseded by daoOperations. Review for removal.
     /** @deprecated Replaced by {@link #daoOperations} */

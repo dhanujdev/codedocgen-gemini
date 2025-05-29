@@ -18,4 +18,11 @@ app:
   repoStoragePath: /tmp/repos # On Windows, this might be C:/tmp/repos or similar. Adjust if needed.
   outputBasePath: ./output # Relative to project root
   docsStoragePath: ${app.outputBasePath}/docs
-  diagramsStoragePath: ${app.outputBasePath}/diagrams 
+  diagramsStoragePath: ${app.outputBasePath}/diagrams
+  # Logger Insights Keywords Regex - YAML multi-line syntax for readability
+  pii-keywords-regex: >-
+    \b(ssn|socialsecurity|social_security_number|socsec|driverlicense|driver_license|dl|licnum|passportnumber|passport_number|nationalid|national_id|healthrecord|medicalrecord|health_record|medical_record|ehr|emr|biometric|geolocation|ipaddress|ip_address|deviceid|device_id|cookieid|cookie_id|macaddress|mac_address|imei|imsi|ethereumaddress|eth_address|bitcoinaddress|btc_address|cryptowallet|crypto_wallet|privatekey|priv_key|seedphrase|seed_phrase|email|e-mail|mailaddr|phone|phoneno|phnno|telephone|contactnum|address|addr|streetaddr|homeaddr|dob|dateofbirth|birthdate|mother's maiden name|mothersmaidenname|mmn|username|user_name|uname|userid|user_id|uid|firstname|first_name|fname|firstnm|lastname|last_name|lname|lastnm|fullname|full_name|name|credential|credentials|personalinfo|personal_info|citizenid|citizen_id|voterid|voter_id|taxid|taxpayerid|tin|licenseplate|license_plate|vin|vehicleidentificationnumber)\b
+  pci-keywords-regex: >-
+    \b(creditcard|credit_card|cardnum|card_num|cardnbr|ccnum|ccn|cvv|cvc|csc|cardverification|verificationcode|securitycode|cardsecuritycode|pan|primaryaccountnumber|primary_account_number|cardholder|card_holder_name|expdate|expirationdate|exp_date|expirydate|trackdata|track_data|magstripe|magnetic_stripe|pinblock|pin_block|servicecode|service_code|cardnumber|paymentaccountnumber|payment_account_number|accountnum|acctnum|iban|internationalbankaccountnumber|bankaccount|bank_account|routingnumber|routing_number|achdata|ach_data|wiretransfer|wire_transfer|financialdata|financial_info|paymentinfo|payment_info|vcn|virtualcardnumber|virtual_card_number|tokenizedcard|tokenized_card)\b
+  general-sensitive-keywords-regex: >-
+    \b(password|passwd|secret|token|apikey)\b 

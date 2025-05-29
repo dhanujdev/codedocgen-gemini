@@ -19,18 +19,18 @@ public class WebConfig implements WebMvcConfigurer {
         return new RestTemplate();
     }
 
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-                .allowedOrigins("http://localhost:3000", "http://localhost:3001") // Allow common frontend ports
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .allowedHeaders("*" )
-                .allowCredentials(true);
-        // Allow CORS for static resources (SVGs, etc.)
-        registry.addMapping("/generated-output/**")
-                .allowedOrigins("http://localhost:3000", "http://localhost:3001")
-                .allowedMethods("GET")
-                .allowedHeaders("*");
+    @Bean
+    public WebMvcConfigurer corsConfigurer() {
+        return new WebMvcConfigurer() {
+            @Override
+            public void addCorsMappings(CorsRegistry registry) {
+                registry.addMapping("/**") // Apply to all endpoints
+                        .allowedOrigins("*") // Allow all origins
+                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS") // Allow common methods
+                        .allowedHeaders("*") // Allow all headers
+                        .allowCredentials(false); // Allow credentials if needed, false for wildcard origin
+            }
+        };
     }
 
     @Override

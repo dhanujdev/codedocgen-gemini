@@ -53,7 +53,7 @@ public class JavaParserServiceImpl implements JavaParserService {
     private static final Logger logger = LoggerFactory.getLogger(JavaParserServiceImpl.class);
     private static final String CLASSPATH_OUTPUT_FILE = "codedocgen_cp.txt";
 
-    private static final DaoAnalyzer daoAnalyzer = new DaoAnalyzer();
+    private final DaoAnalyzer daoAnalyzerInstance;
 
     private final MavenBuildService mavenBuildService;
 
@@ -63,6 +63,7 @@ public class JavaParserServiceImpl implements JavaParserService {
     @Autowired
     public JavaParserServiceImpl(MavenBuildService mavenBuildService) {
         this.mavenBuildService = mavenBuildService;
+        this.daoAnalyzerInstance = new DaoAnalyzer();
     }
 
     private void ensureSymbolSolverInitialized(File projectDir) {
@@ -70,17 +71,89 @@ public class JavaParserServiceImpl implements JavaParserService {
             logger.info("Initializing JavaParser Symbol Solver for project: {}", projectDir.getAbsolutePath());
             this.currentProjectDir = projectDir;
 
-            File pomFileForCompile = new File(projectDir, "pom.xml");
-            // Attempt to compile and resolve dependencies first
-            if (pomFileForCompile.exists() && pomFileForCompile.isFile()) {
-                logger.info("Found pom.xml, attempting to build classpath and compile the project for robust symbol resolution.");
+            File gradleBuildFile = new File(projectDir, "build.gradle");
+            File gradleKtsBuildFile = new File(projectDir, "build.gradle.kts");
+            File gradlewBatFile = new File(projectDir, "gradlew.bat");
+            File gradlewFile = new File(projectDir, "gradlew");
+            File pomFile = new File(projectDir, "pom.xml");
+
+            boolean isGradleProject = gradleBuildFile.exists() || gradleKtsBuildFile.exists();
+            boolean isMavenProject = pomFile.exists() && !isGradleProject; // Prefer Gradle if both somehow exist
+
+            if (isGradleProject) {
+                logger.info("Detected Gradle project in {}. Running Gradle commands.", projectDir.getAbsolutePath());
+                String gradleExecutable;
+                String osName = System.getProperty("os.name").toLowerCase();
+                if (osName.contains("win")) {
+                    gradleExecutable = gradlewBatFile.exists() ? gradlewBatFile.getAbsolutePath() : "gradle.bat";
+                } else {
+                    gradleExecutable = gradlewFile.exists() ? gradlewFile.getAbsolutePath() : "gradle";
+                    if (gradlewFile.exists() && !gradlewFile.canExecute()) {
+                        try {
+                            if (gradlewFile.setExecutable(true)) {
+                                logger.info("Made {} executable.", gradlewFile.getAbsolutePath());
+                            } else {
+                                logger.warn("Failed to make {} executable. Build might fail.", gradlewFile.getAbsolutePath());
+                            }
+                        } catch (SecurityException se) {
+                            logger.warn("SecurityException while trying to make {} executable: {}. Build might fail.", gradlewFile.getAbsolutePath(), se.getMessage());
+                        }
+                    }
+                }
+
                 try {
-                    // 1. Build classpath first to make all dependencies available
+                    logger.info("Attempting to compile Gradle project using: {} clean build classes -x test -q --console=plain", gradleExecutable);
+                    ProcessBuilder pbGradleBuild = new ProcessBuilder(gradleExecutable, "clean", "build", "classes", "-x", "test", "-q", "--console=plain");
+                    pbGradleBuild.directory(projectDir);
+                    pbGradleBuild.redirectErrorStream(true);
+                    Process processGradleBuild = pbGradleBuild.start();
+                    StringBuilder gradleBuildOutput = new StringBuilder();
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(processGradleBuild.getInputStream(), StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            gradleBuildOutput.append(line).append(System.lineSeparator());
+                        }
+                    }
+                    int gradleBuildExitCode = processGradleBuild.waitFor();
+                    logger.info("Gradle command finished with exit code: {}. Output: {}", gradleBuildExitCode, gradleBuildOutput.toString());
+
+                    if (gradleBuildExitCode != 0) {
+                        logger.warn("Gradle command failed with exit code {}. Symbol resolution might be incomplete.", gradleBuildExitCode);
+                    } else {
+                        logger.info("Gradle build successful. Verifying JAXB generated file paths for 'com.revinate.sample.datatype'...");
+                        // Check for a known JAXB generated file in the expected package structure
+                        String expectedJaxbPackagePath = "com" + File.separator + "revinate" + File.separator + "sample" + File.separator + "datatype";
+                        String[] jaxbCheckFiles = { "FibonacciFault.java", "FactorialFault.java" };
+
+                        for (String genDirPrefix : new String[]{"build/generated-sources/jaxb", "build/generated/sources/jaxb/main/java", "build/generated/jaxb"}) {
+                            for (String checkFile : jaxbCheckFiles) {
+                                File specificJaxbFile = new File(projectDir, genDirPrefix + File.separator + expectedJaxbPackagePath + File.separator + checkFile);
+                                if (specificJaxbFile.exists()) {
+                                    logger.info("Confirmed JAXB generated file found at: {}", specificJaxbFile.getAbsolutePath());
+                                } else {
+                                    // This is just a trace, as the directory itself will be added to the solver
+                                    logger.trace("JAXB generated file NOT found at path: {}", specificJaxbFile.getAbsolutePath());
+                                }
+                            }
+                        }
+                    }
+                    logger.info("For Gradle projects, JarTypeSolver setup for precise dependency resolution currently relies on system/IDE classpath or requires a custom task to output classpath. We will rely on ReflectionTypeSolver and JavaParserTypeSolver for build outputs.");
+
+                } catch (IOException | InterruptedException e) {
+                    logger.error("Error while running Gradle command: {}", e.getMessage(), e);
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+            } else if (isMavenProject) {
+                logger.info("Detected Maven project in {}. Running Maven commands.", projectDir.getAbsolutePath());
+                try {
                     String osName = System.getProperty("os.name").toLowerCase();
                     String mvnCommand = osName.contains("win") ? "mvn.cmd" : "mvn";
+                    
                     ProcessBuilder pbClasspath = new ProcessBuilder(
-                        mvnCommand,
-                        "dependency:build-classpath",
+                        mvnCommand, "dependency:build-classpath",
                         "-Dmdep.outputFile=" + CLASSPATH_OUTPUT_FILE,
                         "-Dmdep.pathSeparator=" + File.pathSeparator,
                         "-q"
@@ -97,19 +170,15 @@ public class JavaParserServiceImpl implements JavaParserService {
                         }
                     }
                     int classpathExitCode = processClasspath.waitFor();
-                    logger.info("Maven 'dependency:build-classpath' finished with exit code: {}. Output:\n{}", classpathExitCode, mavenClasspathOutput.toString());
+                    logger.info("Maven 'dependency:build-classpath' finished with exit code: {}. Output: {}", classpathExitCode, mavenClasspathOutput.toString());
 
-                    // 2. Attempt to compile the project
                     logger.info("Attempting to compile the project via MavenBuildService.");
                     MavenExecutionResult compileResult = mavenBuildService.runMavenCommandWithExplicitVersion(projectDir, (String) null, "compile", "-DskipTests", "-q", "-Dmaven.compiler.failOnError=false", "-Dmaven.compiler.failOnWarning=false");
-                    logger.info("Maven 'compile' command finished with exit code: {}. Output:\n{}", compileResult.getExitCode(), compileResult.getOutput());
+                    logger.info("Maven 'compile' command finished with exit code: {}. Output: {}", compileResult.getExitCode(), compileResult.getOutput());
 
                     if (!compileResult.isSuccess()) {
-                        logger.warn("Initial Maven compile command failed with exit code {}. Generated sources might be missing or incomplete. Errors might affect symbol resolution.", compileResult.getExitCode());
-                        // Further attempts to resolve dependencies if compile fails can be added here if needed,
-                        // but build-classpath should have handled most dependency availability.
+                        logger.warn("Initial Maven compile command failed with exit code {}. Errors might affect symbol resolution.", compileResult.getExitCode());
                     }
-
                 } catch (IOException | InterruptedException e) {
                     logger.error("Error while running Maven commands for Symbol Solver pre-step: {}", e.getMessage(), e);
                     if (e instanceof InterruptedException) {
@@ -117,7 +186,7 @@ public class JavaParserServiceImpl implements JavaParserService {
                     }
                 }
             } else {
-                logger.info("No pom.xml found in {}, skipping Maven pre-compile and classpath build steps.", projectDir.getAbsolutePath());
+                logger.warn("No pom.xml or build.gradle/build.gradle.kts file found in {}. Skipping build system pre-compile and classpath build steps. Resolution will be limited.", projectDir.getAbsolutePath());
             }
 
             CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();
@@ -157,10 +226,18 @@ public class JavaParserServiceImpl implements JavaParserService {
             
             // Add common generated source directories
             String[] generatedSourceDirs = {
-                "target/generated-sources/annotations", // Common for annotation processors
-                "target/generated-sources/apt",     // Another common for annotation processors
-                "target/generated-sources/jaxb",    // For JAXB if used
-                "build/generated/sources/annotationProcessor/java/main" // Gradle default
+                // Maven specific
+                "target/generated-sources/annotations",
+                "target/generated-sources/apt",
+                "target/generated-sources/jaxb",
+                // Gradle specific
+                "build/generated/sources/annotationProcessor/java/main", // Gradle default for annotation processors
+                "build/generated-sources/jaxb",                          // Common for JAXB with Gradle
+                "build/generated/sources/jaxb/main/java",                // JAXB with main sourceSet (Gradle)
+                "build/generated/jaxb",                                  // Another Gradle JAXB variant
+                "build/generated-java",                                  // General Gradle generated Java
+                "build/generated/sources/wsimport/main/java",            // wsimport with main sourceSet (Gradle)
+                "build/generated-sources/wsimport"                       // wsimport general (Gradle)
             };
             for (String genDir : generatedSourceDirs) {
                 File generatedSrcDir = new File(projectDir, genDir);
@@ -172,58 +249,96 @@ public class JavaParserServiceImpl implements JavaParserService {
 
             // Add compiled output directories of the project being analyzed
             // These are important for resolving symbols from compiled code, especially after annotation processing (Lombok)
+            if (isGradleProject) {
+                String[] gradleCompiledDirs = {
+                    "build/classes/java/main", "build/classes/kotlin/main", "build/classes/scala/main", 
+                    "build/classes/java/test", "build/classes/kotlin/test", "build/classes/scala/test"
+                    // "build/resources/main", "build/resources/test" // Resource directories typically don't contain .class files for symbol solving
+                };
+                for (String dir : gradleCompiledDirs) {
+                    File compiledDir = new File(projectDir, dir);
+                    if (compiledDir.exists() && compiledDir.isDirectory()) {
+                        logger.info("Adding JarTypeSolver for Gradle compiled directory: {}", compiledDir.getAbsolutePath());
+                        try {
+                            combinedTypeSolver.add(new JarTypeSolver(compiledDir));
+                        } catch (Exception e) {
+                            logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This directory will be skipped.", compiledDir.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+                        }
+                    } else {
+                        logger.trace("Gradle compiled directory {} does not exist or is not a directory.", compiledDir.getAbsolutePath());
+                    }
+                }
+            }
+            
+            // Maven specific or general fallback if dirs exist
             File targetClasses = new File(projectDir, "target/classes");
             if (targetClasses.exists() && targetClasses.isDirectory()) {
-                logger.info("Adding JavaParserTypeSolver for project's compiled classes: {}", targetClasses.getAbsolutePath());
-                combinedTypeSolver.add(new JavaParserTypeSolver(targetClasses));
-            } else {
-                logger.warn("Project compiled classes directory {} does not exist. This might affect resolution of generated code (e.g., Lombok).", targetClasses.getAbsolutePath());
+                // logger.info("Adding JavaParserTypeSolver for project's compiled classes (target/classes): {}", targetClasses.getAbsolutePath()); // Incorrect: JavaParserTypeSolver is for .java files
+                // combinedTypeSolver.add(new JavaParserTypeSolver(targetClasses));
+                logger.info("Maven compiled classes directory {} exists. Adding as JarTypeSolver.", targetClasses.getAbsolutePath());
+                try {
+                    combinedTypeSolver.add(new JarTypeSolver(targetClasses));
+                } catch (Exception e) {
+                    logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This directory will be skipped.", targetClasses.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+                }
+            } else if (isMavenProject) { // Only warn if it's a Maven project and it's missing
+                logger.warn("Maven project compiled classes directory {} does not exist.", targetClasses.getAbsolutePath());
             }
+
             File targetTestClasses = new File(projectDir, "target/test-classes");
             if (targetTestClasses.exists() && targetTestClasses.isDirectory()) {
-                logger.info("Adding JavaParserTypeSolver for project's compiled test classes: {}", targetTestClasses.getAbsolutePath());
-                combinedTypeSolver.add(new JavaParserTypeSolver(targetTestClasses));
-            } else {
-                logger.warn("Project compiled test classes directory {} does not exist.", targetTestClasses.getAbsolutePath());
+                // logger.info("Adding JavaParserTypeSolver for project's compiled test classes (target/test-classes): {}", targetTestClasses.getAbsolutePath()); // Incorrect: JavaParserTypeSolver is for .java files
+                // combinedTypeSolver.add(new JavaParserTypeSolver(targetTestClasses));
+                 logger.info("Maven compiled test classes directory {} exists. Adding as JarTypeSolver.", targetTestClasses.getAbsolutePath());
+                 try {
+                    combinedTypeSolver.add(new JarTypeSolver(targetTestClasses));
+                } catch (Exception e) {
+                    logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This directory will be skipped.", targetTestClasses.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+                }
+            } else if (isMavenProject) { // Only warn if it's a Maven project and it's missing
+                logger.warn("Maven project compiled test classes directory {} does not exist.", targetTestClasses.getAbsolutePath());
             }
 
             // Add JarTypeSolvers for Maven project dependencies (using the pre-built classpath file)
-            File classpathFile = new File(projectDir, CLASSPATH_OUTPUT_FILE);
-            if (classpathFile.exists() && classpathFile.isFile()) {
-                try {
-                    String classpath = new String(Files.readAllBytes(classpathFile.toPath()), StandardCharsets.UTF_8).trim();
-                    logger.info("Raw classpath from {}: '{}'", CLASSPATH_OUTPUT_FILE, classpath);
-                    if (classpath != null && !classpath.isEmpty()) {
-                        String[] jarPaths = classpath.split(Pattern.quote(File.pathSeparator));
-                        logger.info("Found {} potential JAR paths in classpath file.", jarPaths.length);
-                        for (String jarPath : jarPaths) {
-                            String trimmedJarPath = jarPath != null ? jarPath.trim() : "";
-                            if (!trimmedJarPath.isEmpty()) {
-                                File jarFile = new File(trimmedJarPath);
-                                if (jarFile.exists() && jarFile.isFile()) {
-                                    try {
-                                        logger.info("Adding JarTypeSolver for dependency: {}", jarFile.getAbsolutePath());
-                                        combinedTypeSolver.add(new JarTypeSolver(jarFile));
-                                    } catch (Exception e) {
-                                        logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This JAR will be skipped.", jarFile.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+            // This part is Maven-specific because it relies on CLASSPATH_OUTPUT_FILE
+            if (isMavenProject) {
+                File classpathFile = new File(projectDir, CLASSPATH_OUTPUT_FILE);
+                if (classpathFile.exists() && classpathFile.isFile()) {
+                    try {
+                        String classpath = new String(Files.readAllBytes(classpathFile.toPath()), StandardCharsets.UTF_8).trim();
+                        logger.info("Raw classpath from {}: '{}'", CLASSPATH_OUTPUT_FILE, classpath);
+                        if (classpath != null && !classpath.isEmpty()) {
+                            String[] jarPaths = classpath.split(Pattern.quote(File.pathSeparator));
+                            logger.info("Found {} potential JAR paths in classpath file.", jarPaths.length);
+                            for (String jarPath : jarPaths) {
+                                String trimmedJarPath = jarPath != null ? jarPath.trim() : "";
+                                if (!trimmedJarPath.isEmpty()) {
+                                    File jarFile = new File(trimmedJarPath);
+                                    if (jarFile.exists() && jarFile.isFile()) {
+                                        try {
+                                            logger.info("Adding JarTypeSolver for dependency: {}", jarFile.getAbsolutePath());
+                                            combinedTypeSolver.add(new JarTypeSolver(jarFile));
+                                        } catch (Exception e) {
+                                            logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This JAR will be skipped.", jarFile.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+                                        }
+                                    } else {
+                                        logger.warn("Dependency JAR path from classpath file does not exist or is not a file: {}", trimmedJarPath);
                                     }
-                                } else {
-                                    logger.warn("Dependency JAR path from classpath file does not exist or is not a file: {}", trimmedJarPath);
                                 }
                             }
+                        } else {
+                            logger.warn("Classpath file {} was empty or null.", CLASSPATH_OUTPUT_FILE);
                         }
-                    } else {
-                        logger.warn("Classpath file {} was empty or null.", CLASSPATH_OUTPUT_FILE);
+                    } catch (IOException e) {
+                        logger.error("Error reading classpath file {}: {}", CLASSPATH_OUTPUT_FILE, e.getMessage());
+                    } finally {
+                        if (!classpathFile.delete()) {
+                            logger.warn("Failed to delete temporary classpath file: {}", classpathFile.getAbsolutePath());
+                        }
                     }
-                } catch (IOException e) {
-                    logger.error("Error reading classpath file {}: {}", CLASSPATH_OUTPUT_FILE, e.getMessage());
-                } finally {
-                    if (!classpathFile.delete()) {
-                        logger.warn("Failed to delete temporary classpath file: {}", classpathFile.getAbsolutePath());
-                    }
+                } else {
+                     logger.warn("Maven classpath file {} not found after 'dependency:build-classpath'. Dependencies might not be resolved via JarTypeSolver.", CLASSPATH_OUTPUT_FILE);
                 }
-            } else {
-                 logger.warn("Classpath file {} not found after 'dependency:build-classpath'. Dependencies might not be resolved.", CLASSPATH_OUTPUT_FILE);
             }
             
             // Fallback if no standard source roots found (AFTER attempting specific ones)
@@ -275,16 +390,16 @@ public class JavaParserServiceImpl implements JavaParserService {
 
     @Override
     public ClassMetadata parseFile(File javaFile) {
-        ensureSymbolSolverInitialized(currentProjectDir != null ? currentProjectDir : javaFile.getParentFile()); // Initialize if not already, use project dir or parent
+        ensureSymbolSolverInitialized(currentProjectDir != null ? currentProjectDir : javaFile.getParentFile());
         try (FileInputStream in = new FileInputStream(javaFile)) {
             CompilationUnit cu = StaticJavaParser.parse(in);
             String packageName = cu.getPackageDeclaration().map(pd -> pd.getName().asString()).orElse("");
-            ClassMetadataVisitor visitor = new ClassMetadataVisitor(javaFile.getAbsolutePath(), packageName);
+            ClassMetadataVisitor visitor = new ClassMetadataVisitor(javaFile.getAbsolutePath(), packageName, this.symbolResolver, this.daoAnalyzerInstance);
             visitor.visit(cu, null);
             return visitor.getClassMetadata();
         } catch (Exception e) {
             logger.error("Failed to parse Java file {}: {}", javaFile.getAbsolutePath(), e.getMessage(), e);
-            return null; // Or throw a custom exception
+            return null;
         }
     }
 
@@ -298,7 +413,7 @@ public class JavaParserServiceImpl implements JavaParserService {
                 .filter(path -> path.toString().endsWith(".java") && Files.isRegularFile(path))) {
             javaFiles.forEach(javaFilePath -> {
                 try {
-                    ClassMetadata classMetadata = parseFile(javaFilePath.toFile());
+                    ClassMetadata classMetadata = parseFileWithResolver(javaFilePath.toFile(), this.symbolResolver, this.daoAnalyzerInstance);
                     if (classMetadata != null) {
                         allClassMetadata.add(classMetadata);
                     }
@@ -318,142 +433,108 @@ public class JavaParserServiceImpl implements JavaParserService {
         return allClassMetadata;
     }
 
+    // Helper for parseProject to use the already initialized resolver
+    private ClassMetadata parseFileWithResolver(File javaFile, JavaSymbolSolver symResolver, DaoAnalyzer daoAnalyst) {
+         try (FileInputStream in = new FileInputStream(javaFile)) {
+            CompilationUnit cu = StaticJavaParser.parse(in);
+            String packageName = cu.getPackageDeclaration().map(pd -> pd.getName().asString()).orElse("");
+            ClassMetadataVisitor visitor = new ClassMetadataVisitor(javaFile.getAbsolutePath(), packageName, symResolver, daoAnalyst);
+            visitor.visit(cu, null);
+            return visitor.getClassMetadata();
+        } catch (Exception e) {
+            logger.error("Failed to parse Java file {}: {}", javaFile.getAbsolutePath(), e.getMessage(), e);
+            throw new RuntimeException("Failed to parse file with resolver: " + javaFile.getAbsolutePath(), e);
+        }
+    }
+
     private static class ClassMetadataVisitor extends VoidVisitorAdapter<Void> {
-        // Change to a simpler logger name
         private static final Logger visitorLogger = LoggerFactory.getLogger("com.codedocgen.parser.ClassMetadataVisitorLogger");
 
         private ClassMetadata classMetadata;
         private final String filePath;
         private final String packageName;
+        private List<MethodMetadata> methodMetadataList;
         private MethodMetadata currentMethodMetadata;
         private String currentClassName;
+        private final JavaSymbolSolver symbolResolver;
+        private final DaoAnalyzer daoAnalyzer;
 
-        public ClassMetadataVisitor(String filePath, String packageName) {
+        public ClassMetadataVisitor(String filePath, String packageName, JavaSymbolSolver symbolResolver, DaoAnalyzer daoAnalyzer) {
             this.filePath = filePath;
             this.packageName = packageName;
             this.classMetadata = new ClassMetadata();
             this.classMetadata.setFilePath(filePath);
             this.classMetadata.setPackageName(packageName);
+            this.symbolResolver = symbolResolver;
+            this.daoAnalyzer = daoAnalyzer;
         }
 
         private void processMethods(List<MethodDeclaration> methods, String currentPackageName, String currentClassName) {
-            if (methods == null) return;
-            List<MethodMetadata> methodMetadataList = new ArrayList<>();
-            for (MethodDeclaration md : methods) {
-                MethodMetadata methodMeta = new MethodMetadata();
-                String methodName = md.getNameAsString();
-                methodMeta.setName(methodName); // Set name on the instance first
-
-                // Set currentMethodMetadata for the visitor to use when traversing this method's body
-                this.currentMethodMetadata = methodMeta; 
-
-                visitorLogger.trace("[CMV] Processing method: {}.{} (Package: {})", currentClassName, methodName, currentPackageName);
-
-                String returnTypeStr = "void"; // Default
-                try {
-                    ResolvedType resolvedReturnType = md.getType().resolve();
-                    returnTypeStr = resolvedReturnType.describe();
-                    visitorLogger.trace("[CMV] Method {}.{} - Resolved return type: {}", currentClassName, methodName, returnTypeStr);
-                } catch (Exception e) {
-                    visitorLogger.warn("[CMV] Could not resolve return type for method {} in class {}. Using declared type: {}. Error: {}", methodName, currentClassName, md.getType().toString(), e.getMessage());
-                    returnTypeStr = md.getType().toString();
-                }
-
-                final String finalCurrentClassNameForLambda = currentClassName; // For use in lambda
-                List<String> parameters = new ArrayList<>();
-                for (com.github.javaparser.ast.body.Parameter p : md.getParameters()) {
-                    try {
-                        ResolvedType resolvedType = p.getType().resolve();
-                        parameters.add(resolvedType.describe() + " " + p.getNameAsString());
-                    } catch (Exception e) {
-                        visitorLogger.warn("[CMV] Could not resolve parameter type for {} in method {} in class {}. Using declared type: {}. Error: {}", p.getNameAsString(), methodName, finalCurrentClassNameForLambda, p.getType().toString(), e.getMessage());
-                        parameters.add(p.getType().toString() + " " + p.getNameAsString());
-                    }
-                }
-                visitorLogger.trace("[CMV] Method {}.{} - Parameters: {}", currentClassName, methodName, parameters);
-
-
-                List<String> annotations = md.getAnnotations().stream()
-                        .map(AnnotationExpr::toString)
-                        .collect(Collectors.toList());
-                List<String> exceptionsThrown = md.getThrownExceptions().stream()
-                        .map(type -> type.asString())
-                        .collect(Collectors.toList());
-                String visibility = getVisibility(md);
-                boolean isStatic = md.isStatic();
-                boolean isAbstract = md.isAbstract();
-
-                List<String> localVariablesList = new ArrayList<>();
-                List<List<String>> parameterAnnotationsList = new ArrayList<>();
-                 // Initialize calledMethods list, it will be populated by visit(MethodCallExpr)
-                methodMeta.setCalledMethods(new ArrayList<>());
-
-
-                if (md.getBody().isPresent()) {
-                    // Extract local variable declarations
-                    md.getBody().get().findAll(com.github.javaparser.ast.expr.VariableDeclarationExpr.class).forEach(varDecl -> {
-                        varDecl.getVariables().forEach(var -> {
-                            String typeStr;
-                            try {
-                                ResolvedType resolvedType = var.getType().resolve();
-                                typeStr = resolvedType.describe();
-                            } catch (Exception e) {
-                                visitorLogger.warn("[CMV] Could not resolve type for local variable {} in method {} in class {}. Using declared type: {}. Error: {}", var.getNameAsString(), methodName, finalCurrentClassNameForLambda, var.getType().toString(), e.getMessage());
-                                typeStr = var.getType().toString();
-                            }
-                            String name = var.getNameAsString();
-                            localVariablesList.add(typeStr + " " + name);
-                        });
-                    });
-                    visitorLogger.trace("[CMV] Method {}.{} - Local variables: {}", currentClassName, methodName, localVariablesList.size());
-
-                    // Visit the method body to find MethodCallExpr instances
-                    // This will trigger visit(MethodCallExpr n, Void arg) for calls within this method
-                    visitorLogger.trace("[CMV] Method {}.{} - Visiting method body.", currentClassName, methodName);
-                    md.getBody().get().accept(this, null); 
-                    visitorLogger.trace("[CMV] Method {}.{} - Finished visiting method body. Called methods found by visitor: {}", currentClassName, methodName, methodMeta.getCalledMethods() != null ? methodMeta.getCalledMethods().size() : 0);
-
-                } else {
-                    visitorLogger.trace("[CMV] Method {}.{} has no body (e.g., abstract or interface method).", currentClassName, methodName);
-                }
-                // --- Parameter Annotations Extraction ---
-                for (Parameter param : md.getParameters()) {
-                    List<String> paramAnns = param.getAnnotations().stream().map(AnnotationExpr::toString).collect(Collectors.toList());
-                    parameterAnnotationsList.add(paramAnns);
-                }
-                // --- End Call Flow & Local Variable Extraction ---
-
-                DaoAnalyzer.DaoAnalysisResult daoResult = daoAnalyzer.analyze(md);
-                List<DaoOperationDetail> daoOperations = daoResult.getOperations();
-
-                methodMeta.setReturnType(returnTypeStr);
-                methodMeta.setParameters(parameters);
-                methodMeta.setAnnotations(annotations);
-                methodMeta.setExceptionsThrown(exceptionsThrown);
-                methodMeta.setVisibility(visibility);
-                methodMeta.setStatic(isStatic);
-                methodMeta.setAbstract(isAbstract);
-                methodMeta.setPackageName(currentPackageName);
-                methodMeta.setClassName(currentClassName);
-                
-                // calledMethods is now populated by the visitor's visit(MethodCallExpr)
-                methodMeta.setLocalVariables(localVariablesList);
-                methodMeta.setParameterAnnotations(parameterAnnotationsList);
-
-                methodMeta.setDaoOperations(daoOperations);
-                methodMeta.setSqlQueries(new ArrayList<>()); 
-                methodMeta.setSqlTables(new ArrayList<>());  
-                methodMeta.setSqlOperations(new ArrayList<>()); 
-                
-                methodMetadataList.add(methodMeta);
+            if (this.methodMetadataList == null) {
+                this.methodMetadataList = new ArrayList<>();
             }
-            classMetadata.setMethods(methodMetadataList);
-            this.currentMethodMetadata = null; // Clear after processing all methods of a class
+            for (MethodDeclaration md : methods) {
+                MethodMetadata method = new MethodMetadata();
+                method.setName(md.getNameAsString());
+                method.setReturnType(md.getType().toString());
+                method.setParameters(md.getParameters().stream()
+                        .map(p -> p.getType().toString() + " " + p.getNameAsString())
+                        .collect(Collectors.toList()));
+                method.setAnnotations(md.getAnnotations().stream()
+                        .map(AnnotationExpr::toString)
+                        .collect(Collectors.toList()));
+                method.setExceptionsThrown(md.getThrownExceptions().stream()
+                        .map(type -> type.toString())
+                        .collect(Collectors.toList()));
+                method.setVisibility(getVisibility(md));
+                method.setStatic(md.isStatic());
+                method.setAbstract(md.isAbstract());
+                method.setPackageName(currentPackageName);
+                method.setClassName(currentClassName);
+                method.setResolvedMethodNode(md);
+
+                List<List<String>> paramAnnotationsList = new ArrayList<>();
+                for (Parameter param : md.getParameters()) {
+                    List<String> currentParamAnnotations = param.getAnnotations().stream()
+                            .map(AnnotationExpr::toString)
+                            .collect(Collectors.toList());
+                    paramAnnotationsList.add(currentParamAnnotations);
+                }
+                method.setParameterAnnotations(paramAnnotationsList);
+
+                List<String> returnTypeAnns = new ArrayList<>();
+                md.getType().getAnnotations().forEach(ann -> returnTypeAnns.add(ann.toString()));
+                method.setReturnTypeAnnotations(returnTypeAnns);
+
+                method.setCalledMethods(new ArrayList<>());
+                method.setExternalCalls(new ArrayList<>());
+                method.setDaoOperations(new ArrayList<>());
+                method.setLocalVariables(new ArrayList<>());
+
+                md.getBody().ifPresent(body -> {
+                    body.findAll(VariableDeclarator.class).forEach(var -> {
+                        method.getLocalVariables().add(var.getType().toString() + " " + var.getNameAsString());
+                    });
+                });
+
+                this.currentMethodMetadata = method;
+                MethodCallVisitor methodCallVisitor = new MethodCallVisitor(this.classMetadata, method, this.symbolResolver, currentPackageName, currentClassName);
+                md.accept(methodCallVisitor, null);
+                
+                method.setDaoOperations(this.daoAnalyzer.analyze(md).getOperations());
+
+                this.methodMetadataList.add(method);
+            }
+            if (this.classMetadata != null && this.methodMetadataList != null) {
+                this.classMetadata.setMethods(this.methodMetadataList);
+            }
+            this.currentMethodMetadata = null;
         }
 
         @Override
         public void visit(ClassOrInterfaceDeclaration n, Void arg) {
             super.visit(n, arg);
+            this.currentClassName = n.getNameAsString();
             classMetadata.setName(n.getNameAsString());
             classMetadata.setType(determineClassType(n, this.packageName));
             classMetadata.setInterface(n.isInterface());
@@ -467,11 +548,16 @@ public class JavaParserServiceImpl implements JavaParserService {
                     fm.setName(var.getNameAsString());
                     String fieldTypeStr;
                     try {
-                        ResolvedType resolvedType = var.getType().resolve();
+                        ResolvedType resolvedType = field.getElementType().resolve();
                         fieldTypeStr = resolvedType.describe();
                     } catch (Exception e) {
-                        logger.warn("Could not resolve type for field {} in class {}. Using declared type: {}. Error: {}", var.getNameAsString(), classMetadata.getName(), var.getTypeAsString(), e.getMessage());
-                        fieldTypeStr = var.getTypeAsString();
+                        try {
+                            ResolvedType resolvedType = var.getType().resolve();
+                            fieldTypeStr = resolvedType.describe();
+                        } catch (Exception e2) {
+                            visitorLogger.warn("Could not resolve type for field {} in class {}. Using declared type: {}. Error: {}", var.getNameAsString(), classMetadata.getName(), var.getTypeAsString(), e2.getMessage());
+                            fieldTypeStr = var.getTypeAsString();
+                        }
                     }
                     fm.setType(fieldTypeStr);
                     fm.setAnnotations(field.getAnnotations().stream().map(AnnotationExpr::toString).collect(Collectors.toList()));
@@ -493,6 +579,7 @@ public class JavaParserServiceImpl implements JavaParserService {
         @Override
         public void visit(EnumDeclaration n, Void arg) {
             super.visit(n, arg);
+            this.currentClassName = n.getNameAsString();
             classMetadata.setName(n.getNameAsString());
             classMetadata.setType("enum");
             classMetadata.setAnnotations(n.getAnnotations().stream().map(AnnotationExpr::toString).collect(Collectors.toList()));
@@ -518,139 +605,43 @@ public class JavaParserServiceImpl implements JavaParserService {
         @Override
         public void visit(AnnotationDeclaration n, Void arg) {
             super.visit(n, arg);
+            this.currentClassName = n.getNameAsString();
             classMetadata.setName(n.getNameAsString());
             classMetadata.setType("annotation");
             classMetadata.setAnnotations(n.getAnnotations().stream().map(AnnotationExpr::toString).collect(Collectors.toList()));
             
             List<FieldMetadata> members = new ArrayList<>();
-            // Iterate over AnnotationMemberDeclaration for annotation types
             n.getMembers().forEach(memberDeclaration -> {
                 if (memberDeclaration instanceof AnnotationMemberDeclaration) {
                     AnnotationMemberDeclaration amd = (AnnotationMemberDeclaration) memberDeclaration;
                     FieldMetadata fieldMeta = new FieldMetadata();
                     fieldMeta.setName(amd.getNameAsString());
-                    // Use asString() for AST Type, resolve if symbol solver is robust enough in the future
                     fieldMeta.setType(amd.getType().asString()); 
                     fieldMeta.setAnnotations(amd.getAnnotations().stream().map(AnnotationExpr::toString).collect(Collectors.toList()));
-                    // Annotation members are implicitly public and static final (for values)
                     fieldMeta.setVisibility("public"); 
-                    // Default value if present
                     amd.getDefaultValue().ifPresent(val -> fieldMeta.setInitializer(val.toString()));
-                    // Annotation members don't have traditional static/final keywords in their declaration 
-                    // but their nature is somewhat constant-like. Not setting isStatic/isFinal here for now.
                     members.add(fieldMeta);
                 }
             });
-            classMetadata.setFields(members); // Store annotation members as fields
-            // Clear methods if any were added by a super visit or previous logic, annotations don't have methods in this context.
+            classMetadata.setFields(members);
             classMetadata.setMethods(new ArrayList<>()); 
         }
 
-        @Override
-        public void visit(MethodCallExpr n, Void arg) {
-            super.visit(n, arg);
-            if (currentMethodMetadata == null) {
-                visitorLogger.trace("[CMV] MethodCallExpr visited outside of a current method context: {} in class {}", n.toString(), classMetadata != null ? classMetadata.getName() : "UNKNOWN_CLASS");
-                return;
-            }
-
-            visitorLogger.trace("[CMV] Visiting MethodCallExpr: '{}' in method: '{}' in class: '{}'", 
-                n.toString(), 
-                currentMethodMetadata.getName(),
-                (classMetadata != null && classMetadata.getName() != null) ? classMetadata.getName() : (currentClassName != null ? currentClassName : "UNKNOWN_CLASS"));
-
-            // Ensure calledMethods list is initialized
-            if (currentMethodMetadata.getCalledMethods() == null) {
-                currentMethodMetadata.setCalledMethods(new ArrayList<>());
-            }
-
-            // Attempt to resolve the method call
-            try {
-                ResolvedMethodDeclaration resolvedMethod = n.resolve();
-                String resolvedSignature = resolvedMethod.getQualifiedSignature();
-                visitorLogger.trace("[CMV] Successfully resolved method call via n.resolve(). Signature: '{}'", resolvedSignature);
-                currentMethodMetadata.getCalledMethods().add(resolvedSignature);
-
-                visitorLogger.trace("[CMV] Resolved method '{}' has {} parameters.", resolvedMethod.getName(), resolvedMethod.getNumberOfParams());
-                for (int i = 0; i < resolvedMethod.getNumberOfParams(); i++) {
-                    ResolvedParameterDeclaration param = resolvedMethod.getParam(i);
-                    visitorLogger.trace("[CMV]   Param {}: Name='{}', Type='{}', Variadic={}", 
-                        i, 
-                        param.getName(), 
-                        param.getType().describe(), 
-                        param.isVariadic());
-                }
-
-            } catch (Exception e) {
-                visitorLogger.trace("[CMV] Failed to resolve method call '{}' using n.resolve(). Attempting fallback. Exception: {} - {}", n.getNameAsString(), e.getClass().getName(), e.getMessage());
-                String fallbackSignature = tryToConstructUnresolvedSignature(n, this.packageName, this.currentClassName != null ? this.currentClassName : (classMetadata != null ? classMetadata.getName() : "UNKNOWN_CLASS"));
-                visitorLogger.trace("[CMV] Fallback signature constructed: '{}'", fallbackSignature);
-                currentMethodMetadata.getCalledMethods().add(fallbackSignature);
-            }
-        }
-
-        private String tryToConstructUnresolvedSignature(MethodCallExpr n, String currentPackageName, String currentClassName) {
-            visitorLogger.trace("[CMV-Fallback] Attempting to construct unresolved signature for: '{}' (Class: {}, Package: {})", n.toString(), currentClassName, currentPackageName);
-
-            String methodName = n.getNameAsString();
-            String scopeName = null; // Initialize to null
-
-            if (n.getScope().isPresent()) {
-                Expression scopeExpr = n.getScope().get();
-                scopeName = scopeExpr.toString(); // Initial raw scope
-                visitorLogger.trace("[CMV-Fallback] Method call has explicit scope: '{}'", scopeName);
-                try {
-                    ResolvedType resolvedType = scopeExpr.calculateResolvedType();
-                    scopeName = resolvedType.describe(); // Attempt to get fully qualified name
-                    visitorLogger.trace("[CMV-Fallback] Scope expression resolved to type: '{}'", scopeName);
-                } catch (Exception e) {
-                    visitorLogger.trace("[CMV-Fallback] Could not resolve type of scope expression '{}'. Using raw expression. Error: {} - {}", scopeExpr.toString(), e.getClass().getName(), e.getMessage());
-                    // scopeName remains the raw scopeExpr.toString()
-                }
-            } else {
-                visitorLogger.trace("[CMV-Fallback] No explicit scope. Assuming current class or import. Current class for context: '{}'", currentClassName);
-                scopeName = currentClassName; // Default to current class name if no explicit scope
-            }
-
-            visitorLogger.trace("[CMV-Fallback] Tentative scope for signature: '{}'", scopeName);
-
-            List<String> argTypes = new ArrayList<>();
-            for (Expression argExpr : n.getArguments()) {
-                try {
-                    ResolvedType argType = argExpr.calculateResolvedType();
-                    argTypes.add(argType.describe());
-                    visitorLogger.trace("[CMV-Fallback] Resolved argument type: '{}' for expr '{}'", argType.describe(), argExpr.toString());
-                } catch (Exception e) {
-                    visitorLogger.trace("[CMV-Fallback] Could not resolve type of argument '{}'. Using UNKNOWN_PARAM_TYPE. Error: {} - {}", argExpr.toString(), e.getClass().getName(), e.getMessage());
-                    argTypes.add("UNKNOWN_PARAM_TYPE"); // Or use argExpr.toString() if preferred for more detail
-                }
-            }
-
-            String params = String.join(", ", argTypes);
-            String finalSignature = "UNRESOLVED_CALL: " + (scopeName != null && !scopeName.trim().isEmpty() ? scopeName + "." : "") + methodName + "(" + params + ")";
-            visitorLogger.trace("[CMV-Fallback] Final constructed signature: '{}'", finalSignature);
-            return finalSignature;
-        }
-
         private String determineClassType(ClassOrInterfaceDeclaration n, String currentPackageName) {
-            // Prioritize Spring stereotype annotations
             if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().endsWith("Controller") || a.getNameAsString().endsWith("RestController"))) return "controller";
             if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().endsWith("Service"))) return "service";
             if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().endsWith("Repository"))) return "repository";
 
-            // Heuristic: Repository by name or by interface extension
+            if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().equals("WebService"))) return "soap";
+            if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().equals("Endpoint"))) return "soap";
+
             if (n.getNameAsString().endsWith("Repository")) return "repository";
             if (n.getExtendedTypes().stream().anyMatch(t -> t.getNameAsString().matches("(JpaRepository|CrudRepository|PagingAndSortingRepository)"))) return "repository";
             if (n.getImplementedTypes().stream().anyMatch(t -> t.getNameAsString().matches("(JpaRepository|CrudRepository|PagingAndSortingRepository)"))) return "repository";
 
-            // Check for SOAP Endpoint annotation (e.g., Spring WS @Endpoint)
-            if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().equals("Endpoint"))) return "soap";
-            // Add check for JAX-WS @WebService if needed
-            // if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().equals("WebService"))) return "soap";
-
             if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().endsWith("Component"))) {
                  if (n.getAnnotations().stream().anyMatch(a -> a.getNameAsString().endsWith("Configuration"))) return "config";
-                 return "component"; // Generic component if not a more specific stereotype like Repository
+                 return "component";
             }
             if (n.isAnnotationPresent("Entity") || n.isAnnotationPresent("jakarta.persistence.Entity") || n.isAnnotationPresent("javax.persistence.Entity") || n.isAnnotationPresent("Table") || n.isAnnotationPresent("jakarta.persistence.Table") || n.isAnnotationPresent("javax.persistence.Table")) {
                 return "entity";
@@ -661,7 +652,6 @@ public class JavaParserServiceImpl implements JavaParserService {
             if (n.isAnnotationPresent("Repository") || n.getNameAsString().endsWith("Repository") || n.getNameAsString().endsWith("Dao") || n.getNameAsString().endsWith("DAO")) {
                 return "repository";
             }
-            // If in a .model, .domain, or .dto package and not identified as anything else, it's a model/dto.
             boolean isInModelPackage = currentPackageName != null && 
                 (currentPackageName.contains(".model") || 
                  currentPackageName.contains(".domain") || 
@@ -671,33 +661,120 @@ public class JavaParserServiceImpl implements JavaParserService {
                 return "model";
             }
 
-            // If no specific stereotype, then determine by structure
             if (n.isInterface()) return "interface";
-            // Abstract class check removed as it might overlap with stereotypes; type will be stereotype if applicable.
-            // if (n.isAbstract()) return "abstract"; // Can be an abstract service, controller, etc.
             
             if (n.getNameAsString().endsWith("Test") || n.getNameAsString().startsWith("Test")) return "test";
             
-            return "class"; // Default to class if no other type matches
+            return "class";
         }
 
         private String getVisibility(MethodDeclaration md) {
             if (md.isPublic()) return "public";
             if (md.isProtected()) return "protected";
             if (md.isPrivate()) return "private";
-            return "default"; // package-private
+            return "default";
         }
 
-        // Helper method to get visibility string from Modifiers
         private String getVisibilityFromModifiers(NodeList<Modifier> modifiers) {
             if (modifiers.stream().anyMatch(m -> m.getKeyword() == Modifier.Keyword.PUBLIC)) return "public";
             if (modifiers.stream().anyMatch(m -> m.getKeyword() == Modifier.Keyword.PROTECTED)) return "protected";
             if (modifiers.stream().anyMatch(m -> m.getKeyword() == Modifier.Keyword.PRIVATE)) return "private";
-            return "default"; // package-private
+            return "default";
         }
 
         public ClassMetadata getClassMetadata() {
+            if (this.classMetadata != null && this.classMetadata.getMethods() == null && this.methodMetadataList != null) {
+                this.classMetadata.setMethods(this.methodMetadataList);
+            }
             return classMetadata;
+        }
+
+        private class MethodCallVisitor extends VoidVisitorAdapter<Void> {
+            private final ClassMetadata classMetadataContext;
+            private final MethodMetadata methodMetadataContext;
+            private final JavaSymbolSolver specificResolver;
+            private final String outerClassPackageName;
+            private final String outerClassName;
+
+            public MethodCallVisitor(ClassMetadata classCtx, MethodMetadata methodCtx, JavaSymbolSolver resolver, String pkgName, String clsName) {
+                this.classMetadataContext = classCtx;
+                this.methodMetadataContext = methodCtx;
+                this.specificResolver = resolver;
+                this.outerClassPackageName = pkgName;
+                this.outerClassName = clsName;
+            }
+
+            @Override
+            public void visit(MethodCallExpr n, Void arg) {
+                super.visit(n, arg);
+
+                if (methodMetadataContext == null) {
+                    visitorLogger.trace("[MCV] MethodCallExpr visited but methodMetadataContext is null. Call: {}. Class context: {}", n.toString(), classMetadataContext != null ? classMetadataContext.getName() : "UNKNOWN_CLASS");
+                    return;
+                }
+
+                visitorLogger.trace("[MCV] Visiting MethodCallExpr: '{}' in method: '{}' of class: '{}'", 
+                    n.toString(), 
+                    methodMetadataContext.getName(),
+                    outerClassName != null ? outerClassName : "UNKNOWN_CLASS");
+
+                if (methodMetadataContext.getCalledMethods() == null) {
+                    methodMetadataContext.setCalledMethods(new ArrayList<>()); 
+                }
+
+                try {
+                    ResolvedMethodDeclaration resolvedMethod = n.resolve(); 
+                    String resolvedSignature = resolvedMethod.getQualifiedSignature();
+                    visitorLogger.trace("[MCV] Successfully resolved method call '{}'. Signature: '{}'", n.getNameAsString(), resolvedSignature);
+                    methodMetadataContext.getCalledMethods().add(resolvedSignature);
+                } catch (Exception e) {
+                    visitorLogger.warn("[MCV] Failed to resolve method call '{}' in {}.{}. Attempting fallback. Error: {} - {}", 
+                        n.getNameAsString(), outerClassName, methodMetadataContext.getName(), e.getClass().getName(), e.getMessage(), e);
+                    String fallbackSignature = tryToConstructUnresolvedSignature(n, this.outerClassPackageName, this.outerClassName);
+                    visitorLogger.trace("[MCV] Fallback signature for '{}': '{}'", n.getNameAsString(), fallbackSignature);
+                    methodMetadataContext.getCalledMethods().add(fallbackSignature);
+                }
+            }
+
+            private String tryToConstructUnresolvedSignature(MethodCallExpr n, String currentPackageName, String currentClassName) {
+                visitorLogger.trace("[MCV-Fallback] Constructing signature for unresolved call: '{}' in context class: {}, package: {}", n.toString(), currentClassName, currentPackageName);
+                String methodName = n.getNameAsString();
+                String scopeName = null; 
+
+                if (n.getScope().isPresent()) {
+                    Expression scopeExpr = n.getScope().get();
+                    scopeName = scopeExpr.toString(); 
+                    visitorLogger.trace("[MCV-Fallback] Explicit scope: '{}'", scopeName);
+                    try {
+                        ResolvedType resolvedType = scopeExpr.calculateResolvedType(); 
+                        scopeName = resolvedType.describe(); 
+                        visitorLogger.trace("[MCV-Fallback] Scope resolved to type: '{}'", scopeName);
+                    } catch (Exception e) {
+                        visitorLogger.warn("[MCV-Fallback] Could not resolve type of scope expression '{}' for method call '{}'. Using raw scope. Error: {} - {}", 
+                            scopeExpr.toString(), methodName, e.getClass().getName(), e.getMessage());
+                    }
+                } else {
+                    visitorLogger.trace("[MCV-Fallback] No explicit scope for call to '{}'. Assuming current class or import context: '{}'", methodName, currentClassName);
+                    scopeName = currentClassName;
+                }
+                
+                List<String> argTypes = new ArrayList<>();
+                for (Expression argExpr : n.getArguments()) {
+                    try {
+                        ResolvedType argType = argExpr.calculateResolvedType(); 
+                        argTypes.add(argType.describe());
+                        visitorLogger.trace("[MCV-Fallback] Arg '{}' resolved to type: '{}'", argExpr.toString(), argType.describe());
+                    } catch (Exception e) {
+                        visitorLogger.warn("[MCV-Fallback] Could not resolve type of argument '{}' for method call '{}'. Using UNKNOWN_PARAM_TYPE. Error: {} - {}", 
+                            argExpr.toString(), methodName, e.getClass().getName(), e.getMessage());
+                        argTypes.add("UNKNOWN_PARAM_TYPE"); 
+                    }
+                }
+                String params = String.join(", ", argTypes);
+                String finalSignature = "UNRESOLVED_CALL: " + (scopeName != null && !scopeName.trim().isEmpty() ? scopeName + "." : "") + methodName + "(" + params + ")";
+                visitorLogger.trace("[MCV-Fallback] Constructed signature for '{}': '{}'", methodName, finalSignature);
+                return finalSignature;
+            }
         }
     }
 } 

@@ -35,6 +35,43 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Spring Boot Starter for Web Services (SOAP) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web-services</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>wsdl4j</groupId>
+            <artifactId>wsdl4j</artifactId>
+            <version>1.6.3</version> <!-- Common version, or let Spring Boot manage if possible -->
+        </dependency>
+
+        <!-- Jakarta JAX-WS API for SOAP annotations -->
+        <dependency>
+            <groupId>jakarta.xml.ws</groupId>
+            <artifactId>jakarta.xml.ws-api</artifactId>
+            <version>4.0.1</version> <!-- Check for latest compatible version with Spring Boot 3.2 -->
+        </dependency>
+        <dependency> <!-- Explicitly add JWS API just in case -->
+            <groupId>jakarta.jws</groupId>
+            <artifactId>jakarta.jws-api</artifactId>
+            <version>3.0.0</version> <!-- Check for latest compatible version -->
+        </dependency>
+
+        <!-- Apache CXF for JAX-RS Swagger integration -->
+        <dependency>
+            <groupId>org.apache.cxf</groupId>
+            <artifactId>cxf-rt-rs-service-description-swagger</artifactId>
+            <version>3.4.4</version>
+        </dependency>
+
+        <!-- JAXB runtime for Java 11+ -->
+        <dependency>
+            <groupId>org.glassfish.jaxb</groupId>
+            <artifactId>jaxb-runtime</artifactId>
+            <version>4.0.4</version> <!-- Check for latest compatible version with Spring Boot 3.2 and Java 21 -->
+        </dependency>
+
         <!-- OpenAPI 3 Documentation -->
         <dependency>
             <groupId>org.springdoc</groupId>
