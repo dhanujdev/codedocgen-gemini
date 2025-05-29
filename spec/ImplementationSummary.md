@@ -12,7 +12,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
     1.  User provides a public Git repository URL via the frontend.
     2.  Frontend sends the URL to the backend's `/api/analysis/analyze` endpoint.
     3.  Backend clones the repository, extracts project name, performs deep analysis (project type detection, Spring Boot versioning from pom.xml/build.gradle, **advanced Java parsing with symbol resolution**, class/method metadata extraction, **call flow tracing**, **comprehensive DAO/DB analysis including entity-to-class mappings and basic SQL variable tracking**, endpoint extraction, generation of multiple diagram types), and returns a structured `ParsedDataResponse`.
-    4.  Frontend displays the received information in a user-friendly sidebar-navigated interface, correctly loading served diagrams and detailed analysis results, including an entity-centric database view and **call flows with human-readable names parsed from full Java signatures**.
+    4.  Frontend displays the received information in a user-friendly sidebar-navigated interface, correctly loading served diagrams and detailed analysis results, including an entity-centric database view and **call flows presented as formatted, copyable plaintext traces with human-readable names parsed from full Java signatures.**
 
 ## 2. Backend Details (`codedocgen-backend`)
 
@@ -109,8 +109,8 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **`ClassesPage.js`:** Detailed view of parsed classes.
 *   **`ApiSpecsPage.js`:** Displays OpenAPI specs and detailed WSDL/XSD structures.
 *   **`CallFlowPage.js`:**
-    *   Displays sequence diagrams and raw call steps.
-    *   Integrates `FlowExplorer.tsx` for interactive exploration of flow steps.
+    *   Displays sequence diagrams.
+    *   Integrates `FlowExplorer.tsx` for interactive exploration of flow steps, now presented as a numbered, parameter-less, plaintext list with a copy-to-clipboard feature.
     *   **Features a `generateFlowDisplayName` helper function to parse full Java method signatures (including parameters with types and names) and generate human-readable titles for diagrams and flow details.**
 *   **`DiagramsPage.js`:** Displays general diagrams.
 *   **`DatabasePage.js`:**
@@ -135,8 +135,9 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Standardized on Material UI as the primary UI library, ensuring a consistent and modern look and feel.
     *   Implemented responsive design, ensuring the application layout (especially the main content area) adapts correctly to different screen sizes and zoom levels.
 *   **Comprehensive Call Flow Analysis:**
-    *   Detailed sequence diagrams and raw call steps.
-    *   **User-friendly display names for call flows in the UI, parsed from complex Java signatures.**
+    *   Detailed sequence diagrams.
+    *   **Call flows displayed in the UI as a simplified, numbered plaintext list (parameters removed, e.g., `myMethod()`) with a copy-to-clipboard feature, ideal for AI assistant input.**
+    *   **User-friendly display names for call flows, parsed from complex Java signatures.**
 *   **Database & DAO Insights:**
     *   Detection of entities, DAO/repository operations (with basic SQL variable tracking).
     *   Generation of a database schema diagram.
@@ -167,7 +168,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   [COMPLETED] Ensure `org.apache.cxf.jaxrs.swagger` package is available (related to `RestConfig.java` compilation error - resolved by adding `cxf-rt-rs-service-description-swagger` dependency).
     *   **Deeper YAML Parsing**: Basic `YamlParserService` implemented. Further integration and use depend on identifying specific YAML files within user projects that require deep parsing for meaningful data extraction.
 *   **Diagrams & Visualization:**
-    *   More interactive call flow visualization beyond current expand/collapse.
+    *   More interactive call flow visualization beyond current expand/collapse. (Note: Textual representation has been enhanced with a clean format and copy functionality).
 *   **Frontend Enhancements:**
     *   UI/UX improvements for very large datasets (filtering, searching, pagination).
     *   Dark mode.
@@ -188,9 +189,11 @@ This document summarizes the current state of the CodeDocGen project, covering b
 - Sequence diagrams use quoted FQNs.
 - **Symbol Solver & Pre-compilation (Backend)**: `mvn compile` pre-step for enhanced symbol resolution.
 - **WSDL & XSD Deep Parsing (Frontend & Backend)**.
-- **Call Flow Page & Sidebar Navigation (Frontend)**:
-    - Integration of `FlowExplorer.tsx` for better step navigation.
-    - **Implementation of `generateFlowDisplayName` in `CallFlowPage.js` for significantly improved, human-readable names for call flows and sequence diagrams, correctly parsing method signatures including parameters.**
+- **Call Flow UI Enhancements (Frontend)**:
+    - Call flows in `FlowExplorer.tsx` are now displayed as a clean, numbered plaintext list.
+    - Method parameters are removed from the display (e.g., `method(param)` becomes `method()`).
+    - A "Copy Trace" button allows users to easily copy the formatted trace.
+    - The `generateFlowDisplayName` function in `CallFlowPage.js` continues to provide human-readable titles for diagrams and flow details.
 - **Refined API Specs UI**.
 - **Enhanced Component Diagram for SOAP/Legacy Applications**.
 - **Comprehensive Usecase Diagram for SOAP/Legacy Applications**.
@@ -208,5 +211,16 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   `ProjectDetectorServiceImpl.java`: Added Gradle support for Spring Boot version detection (with regex fixes). - ✅ DONE
     *   `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced.
     *   `DaoAnalyzer.java`: Basic support for SQL in variables.
+
+(Removed the old "New Feature: DAO/JDBC Analysis" section as its content is now integrated above and in the main sections) 
+
+## Call Flow UI Enhancements (Frontend)
+- Call flows in `FlowExplorer.tsx` are now displayed as a clean, numbered plaintext list.
+- Method parameters are removed from the display (e.g., `method(param)` becomes `method()`).
+- A "Copy Trace" button allows users to easily copy the formatted trace.
+- The `generateFlowDisplayName` function in `CallFlowPage.js` continues to provide human-readable titles.
+
+## Refined API Specs UI
+- **Enhanced API Specs UI**.
 
 (Removed the old "New Feature: DAO/JDBC Analysis" section as its content is now integrated above and in the main sections) 

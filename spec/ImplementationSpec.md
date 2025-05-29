@@ -93,7 +93,7 @@ codedocgen-frontend/
 │   ├── pages/
 │   │   ├── OverviewPage.js         // Displays project summary, Spring Boot info.
 │   │   ├── ApiSpecsPage.js         // Displays OpenAPI/SwaggerUI and detailed WSDL/XSD.
-│   │   ├── CallFlowPage.js         // Displays sequence diagrams and raw call steps.
+│   │   ├── CallFlowPage.js         // Displays sequence diagrams and formatted, interactive call traces (plaintext, no params, copyable).
 │   │   ├── DiagramsPage.js         // General diagrams page (class, component, usecase, ERD).
 │   │   ├── DatabasePage.js         // Updated to use DbAnalysisResult for entity-centric view & detailed ops
 │   │   ├── GherkinPage.js
@@ -192,7 +192,11 @@ codedocgen-frontend/
 2.  **Call Flow Analysis (Backend - `CallFlowAnalyzer`, `DiagramServiceImpl`):**
     *   DFS from entry points to build call sequences.
     *   Sequence diagrams generated from these steps with clean labels.
-    *   Frontend (`CallFlowPage.js`) now uses a sophisticated `generateFlowDisplayName` function to create user-friendly names for flows and diagrams from full Java method signatures, including parsing parameter types and names for better readability.
+    *   Frontend (`CallFlowPage.js` and `FlowExplorer.tsx`) now displays call flows as a numbered list of method calls.
+        *   The display is simplified: parameters are removed (e.g., `myMethod(int a)` becomes `myMethod()`).
+        *   Prefixes like "RESOLVED_CALL:" or "UNRESOLVED:" are not shown in the UI.
+        *   A "Copy Trace" button allows users to copy the formatted plaintext trace to the clipboard, suitable for AI assistants.
+    *   The `generateFlowDisplayName` function in `CallFlowPage.js` continues to create user-friendly names for flows and diagrams from full Java method signatures.
 
 3.  **DAO & Database Analysis (Backend - `DaoAnalysisServiceImpl`, `DaoAnalyzer`):**
     *   Identifies Spring Data repositories and methods.
