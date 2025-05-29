@@ -130,4 +130,5 @@ npm start
     - Call Flow page correctly displays sequence diagrams and raw steps with improved naming.
     - All diagram types are rendered correctly.
     - Accurate Spring Boot version display.
-    - Addressed various bugs in data passing and display. 
+    - Addressed various bugs in data passing and display.
+    - Backend compilation issues related to CXF JAX-RS and Swagger resolved, ensuring more stable data for frontend consumption. 

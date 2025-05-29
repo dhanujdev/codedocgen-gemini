@@ -31,9 +31,9 @@ This is the backend service for the Code Documentation Generator. It is a Spring
 -   **Diagram Generation (PlantUML & Graphviz):**
     -   Renders Class, Component, Usecase, Sequence, ERD, and Database Schema diagrams as SVGs.
     -   Requires Graphviz (`dot` executable).
--   **API Endpoint Extraction:** Identifies REST (`@RequestMapping` with method attribute) and SOAP (`@WebMethod`) API endpoints.
+-   **API Endpoint Extraction:** Identifies REST (`@RequestMapping` with method attribute, other common Spring REST annotations) and SOAP (`@WebMethod`) API endpoints.
 -   **Documentation Generation:** Creates project summaries including method call details and basic tech stack information.
--   **Contract Generation:** Generates OpenAPI v3 specification.
+-   **Contract Generation:** Generates OpenAPI v3 specification (leveraging `cxf-rt-rs-service-description-swagger` for CXF JAX-RS projects where applicable).
 -   **Gherkin Feature File Discovery:** Locates and provides content of `.feature` files.
 -   **Static File Serving:** Serves generated diagrams and other static output.
 -   **REST API:** Provides endpoints for analysis and results, including the new `dbAnalysis` structure in `ParsedDataResponse`.
@@ -67,10 +67,13 @@ Ensure Graphviz `dot` executable is in your PATH.
 -   **Robust Logging:** Extensive `TRACE` and `DEBUG` logging.
 -   **Build & Dependency Management:** Correct use of Maven for symbol solver initialization.
 -   **Bug Fixes:** Addressed numerous parsing and runtime issues.
+-   **Dependency Updates:** Added `cxf-rt-rs-service-description-swagger` to resolve CXF JAX-RS and Swagger integration issues.
 
 ## TODOs (Backend Specific)
 *   **`DaoAnalyzer.java`**: Further enhance to handle more complex cases of SQL in variables or constructed dynamically.
 *   Support for private Git repositories.
 *   Performance optimizations for very large codebases.
 *   Deeper YAML parsing if used for project configuration.
-*   Further refinement of REST endpoint detail extraction for complex request/response bodies. 
+*   Further refinement of REST endpoint detail extraction for complex request/response bodies.
+*   [MINOR WARNING] Address `Maven project compiled test classes directory ... does not exist` if it becomes problematic (currently considered benign).
+*   [MINOR WARNING] Address `Could not detect Java version from pom.xml in [cloned_repo]` if it impacts analysis of diverse projects (main project's Java version is set; this refers to temporary clones). 
