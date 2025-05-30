@@ -43,6 +43,9 @@ import com.codedocgen.service.DaoAnalysisService;
 import com.codedocgen.model.DbAnalysisResult;
 import com.codedocgen.model.LogStatement;
 import com.codedocgen.service.LoggerInsightsService;
+import com.codedocgen.model.PiiPciFinding;
+import com.codedocgen.service.PiiPciDetectionService;
+import com.codedocgen.service.YamlParserService;
 
 @RestController
 @RequestMapping("/api/analysis")
@@ -62,6 +65,8 @@ public class AnalysisController {
     private final CallFlowAnalyzer callFlowAnalyzer;
     private final DaoAnalysisService daoAnalysisService; // Add DaoAnalysisService
     private final LoggerInsightsService loggerInsightsService; // Added LoggerInsightsService
+    private final YamlParserService yamlParserService; // Added YamlParserService
+    private final PiiPciDetectionService piiPciDetectionService; // Added PiiPciDetectionService
 
     @Value("${app.repoStoragePath:/tmp/codedocgen_repos}")
     private String repoStoragePath;
@@ -81,7 +86,9 @@ public class AnalysisController {
                               RestTemplate restTemplate,
                               CallFlowAnalyzer callFlowAnalyzer,
                               DaoAnalysisService daoAnalysisService, // Add DaoAnalysisService
-                              LoggerInsightsService loggerInsightsService) { // Added LoggerInsightsService
+                              LoggerInsightsService loggerInsightsService, // Added LoggerInsightsService
+                              YamlParserService yamlParserService, // Added YamlParserService
+                              PiiPciDetectionService piiPciDetectionService) { // Added PiiPciDetectionService
         this.gitService = gitService;
         this.javaParserService = javaParserService;
         this.projectDetectorService = projectDetectorService;
@@ -94,6 +101,8 @@ public class AnalysisController {
         this.callFlowAnalyzer = callFlowAnalyzer;
         this.daoAnalysisService = daoAnalysisService; // Initialize DaoAnalysisService
         this.loggerInsightsService = loggerInsightsService; // Initialize LoggerInsightsService
+        this.yamlParserService = yamlParserService; // Added YamlParserService
+        this.piiPciDetectionService = piiPciDetectionService; // Added PiiPciDetectionService
     }
 
     @PostMapping("/analyze")
@@ -287,6 +296,11 @@ public class AnalysisController {
                 // Optionally add a warning or error to the response about log insights failing
                  response.setLogStatements(new ArrayList<>()); // Set empty list on error
             }
+
+            // PCI/PII Scan
+            // Convert File to Path before calling the service
+            List<PiiPciFinding> piiPciFindings = piiPciDetectionService.scanRepository(localRepoPath.toPath(), null); 
+            response.setPiiPciFindings(piiPciFindings);
 
             // 12. Finalize and return response
             logger.info("Completed analysis for repository: {}", repoUrl);

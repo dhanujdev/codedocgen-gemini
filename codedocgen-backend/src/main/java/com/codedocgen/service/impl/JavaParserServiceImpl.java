@@ -138,6 +138,59 @@ public class JavaParserServiceImpl implements JavaParserService {
                         }
                     }
                     logger.info("For Gradle projects, JarTypeSolver setup for precise dependency resolution currently relies on system/IDE classpath or requires a custom task to output classpath. We will rely on ReflectionTypeSolver and JavaParserTypeSolver for build outputs.");
+                    // Attempt to find JARs in common Gradle output locations
+                    List<Path> gradleJarPaths = new ArrayList<>();
+                    try {
+                        Path buildLibs = projectDir.toPath().resolve("build").resolve("libs");
+                        if (Files.exists(buildLibs) && Files.isDirectory(buildLibs)) {
+                            try (Stream<Path> walk = Files.walk(buildLibs)) {
+                                walk.filter(path -> path.toString().endsWith(".jar"))
+                                    .forEach(gradleJarPaths::add);
+                            }
+                            logger.info("Found {} JARs in {}", gradleJarPaths.size(), buildLibs);
+                        }
+
+                        // Also check subprojects - common for multi-project builds
+                        File[] subdirectories = projectDir.listFiles(File::isDirectory);
+                        if (subdirectories != null) {
+                            for (File subDir : subdirectories) {
+                                Path subLibs = subDir.toPath().resolve("libs"); // Some older Gradle versions or custom configs might put them here
+                                if (Files.exists(subLibs) && Files.isDirectory(subLibs)) {
+                                    int currentSize = gradleJarPaths.size();
+                                    try (Stream<Path> walk = Files.walk(subLibs)) {
+                                        walk.filter(path -> path.toString().endsWith(".jar"))
+                                            .forEach(gradleJarPaths::add);
+                                    }
+                                    if (gradleJarPaths.size() > currentSize) {
+                                        logger.info("Found {} JARs in {}", gradleJarPaths.size() - currentSize, subLibs);
+                                    }
+                                }
+                                Path subBuildLibs = subDir.toPath().resolve("build").resolve("libs");
+                                if (Files.exists(subBuildLibs) && Files.isDirectory(subBuildLibs)) {
+                                    int currentSize = gradleJarPaths.size();
+                                    try (Stream<Path> walk = Files.walk(subBuildLibs)) {
+                                        walk.filter(path -> path.toString().endsWith(".jar"))
+                                            .forEach(gradleJarPaths::add);
+                                    }
+                                     if (gradleJarPaths.size() > currentSize) {
+                                        logger.info("Found {} JARs in {}", gradleJarPaths.size() - currentSize, subBuildLibs);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        for (Path jarPath : gradleJarPaths) {
+                            try {
+                                logger.info("Adding JarTypeSolver for Gradle discovered JAR: {}", jarPath.toString());
+                                combinedTypeSolver.add(new JarTypeSolver(jarPath.toString()));
+                            } catch (Exception e) {
+                                logger.warn("Failed to add JarTypeSolver for Gradle JAR {}: {}", jarPath.toString(), e.getMessage());
+                            }
+                        }
+
+                    } catch (IOException e) {
+                        logger.warn("Error trying to discover Gradle JARs in build/libs: {}", e.getMessage());
+                    }
 
                 } catch (IOException | InterruptedException e) {
                     logger.error("Error while running Gradle command: {}", e.getMessage(), e);
@@ -250,24 +303,23 @@ public class JavaParserServiceImpl implements JavaParserService {
             // Add compiled output directories of the project being analyzed
             // These are important for resolving symbols from compiled code, especially after annotation processing (Lombok)
             if (isGradleProject) {
-                String[] gradleCompiledDirs = {
-                    "build/classes/java/main", "build/classes/kotlin/main", "build/classes/scala/main", 
-                    "build/classes/java/test", "build/classes/kotlin/test", "build/classes/scala/test"
-                    // "build/resources/main", "build/resources/test" // Resource directories typically don't contain .class files for symbol solving
+                String[] buildClassesDirs = {
+                    "build/classes/java/main",      // Gradle default for main sourceset
+                    "build/classes/kotlin/main",    // Gradle default for Kotlin
+                    "build/classes/groovy/main",    // Gradle default for Groovy
+                    "build/classes/scala/main",     // Gradle default for Scala
+                    "build/resources/main"          // Gradle resources
+                    // Add more specific Gradle output dirs if needed (e.g., for subprojects, though this is coarse)
                 };
-                for (String dir : gradleCompiledDirs) {
-                    File compiledDir = new File(projectDir, dir);
-                    if (compiledDir.exists() && compiledDir.isDirectory()) {
-                        logger.info("Adding JarTypeSolver for Gradle compiled directory: {}", compiledDir.getAbsolutePath());
-                        try {
-                            combinedTypeSolver.add(new JarTypeSolver(compiledDir));
-                        } catch (Exception e) {
-                            logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This directory will be skipped.", compiledDir.getAbsolutePath(), e.getClass().getName(), e.getMessage());
-                        }
-                    } else {
-                        logger.trace("Gradle compiled directory {} does not exist or is not a directory.", compiledDir.getAbsolutePath());
+                for (String classesDir : buildClassesDirs) {
+                    File dir = new File(projectDir, classesDir);
+                    if (dir.exists() && dir.isDirectory()) {
+                        logger.info("Adding JavaParserTypeSolver for Gradle build output directory: {}", dir.getAbsolutePath());
+                        combinedTypeSolver.add(new JavaParserTypeSolver(dir));
                     }
                 }
+                 // Add JARs found in build/libs as JarTypeSolvers (Gradle projects)
+                // This is already handled above now more explicitly. Keeping this section for target/classes for Maven.
             }
             
             // Maven specific or general fallback if dirs exist

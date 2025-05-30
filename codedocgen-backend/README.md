@@ -39,13 +39,17 @@ This is the backend service for the Code Documentation Generator. It is a Spring
     *   A basic `YamlParserService` is available to parse YAML files (specified by path) into a `Map<String, Object>` structure. This can be used in the future for deeper analysis of project-specific YAML configurations.
 -   **Diagram Generation (PlantUML & Graphviz):**
     -   Renders Class, Component, Usecase, Sequence, ERD, and Database Schema diagrams as SVGs.
-    -   Requires Graphviz (`dot` executable).
+-   **Comprehensive PII/PCI Scanning (New Feature):**
+    *   Scans all text-based files within the cloned repository (excluding common binary types and irrelevant directories like `.git`, `target`, `build`, `node_modules`).
+    *   Uses configurable regex patterns (defined in `application.yml`) to identify potential PII (e.g., email, SSN) and PCI (e.g., credit card numbers) data.
+    *   Each finding is recorded with file path, line number, column number, type of finding (e.g., `PII_EMAIL`, `PCI_VISA`), and the matched text.
+    *   Results are provided as a list of `PiiPciFinding` objects in `ParsedDataResponse`.
 -   **API Endpoint Extraction:** Identifies REST (`@RequestMapping` with method attribute, other common Spring REST annotations) and SOAP (`@WebMethod`) API endpoints.
 -   **Documentation Generation:** Creates project summaries including method call details and basic tech stack information.
 -   **Contract Generation:** Generates OpenAPI v3 specification (leveraging `cxf-rt-rs-service-description-swagger` for CXF JAX-RS projects where applicable).
 -   **Gherkin Feature File Discovery:** Locates and provides content of `.feature` files.
 -   **Static File Serving:** Serves generated diagrams and other static output.
--   **REST API:** Provides endpoints for analysis and results, including the new `dbAnalysis` structure and `logStatements` in `ParsedDataResponse`.
+-   **REST API:** Provides endpoints for analysis and results, including the new `dbAnalysis` structure, `logStatements`, and `piiPciFindings` in `ParsedDataResponse`.
 -   **Comprehensive Logging.**
 
 ## Run Locally
@@ -84,10 +88,21 @@ Ensure Graphviz `dot` executable is in your PATH.
 -   **Build & Dependency Management:** Correct use of Maven for symbol solver initialization.
 -   **Bug Fixes:** Addressed numerous parsing and runtime issues, including URL parsing for Git cloning and compilation errors related to static context in `LoggerInsightsServiceImpl`.
 -   **Dependency Updates:** Added `cxf-rt-rs-service-description-swagger` to resolve CXF JAX-RS and Swagger integration issues.
+-   **Comprehensive PII/PCI Scanning:**
+    *   Successfully integrated scanning of the entire repository for PII/PCI data.
+    *   Detection patterns are loaded from `application.yml`, allowing for easy customization.
+    *   New models `PiiPciFinding` and service `PiiPciDetectionService` added.
+    *   Results (`List<PiiPciFinding>`) are included in `ParsedDataResponse`.
+-   **YAML Parsing:**
+    *   Added `YamlParserService` and `YamlParserServiceImpl` to provide basic YAML file parsing capabilities (file path to `Map<String, Object>`). Future enhancements can use this for projects heavily reliant on YAML for configuration.
+-   **Accurate Class Typing:** Better distinction between entities, models, and other class stereotypes.
+-   **Lombok Handling:** Improved resolution for Lombok-generated methods.
+-   **Diagram Generation:** All diagrams as SVG; cleaner sequence diagram labels.
 
 ## TODOs (Backend Specific)
 *   **`DaoAnalyzer.java`**: Further enhance to handle more complex cases of SQL in variables or constructed dynamically.
 *   **`LoggerInsightsServiceImpl.java`**: Keyword patterns are now externalized to `application.yml`. Continue to refine and expand these patterns based on real-world examples and feedback.
+*   **`PiiPciDetectionServiceImpl.java`**: Continuously refine regex patterns for accuracy and performance. Ensure robust exclusion of non-relevant files and consider strategies for handling very large files/lines if performance issues arise. Patterns are externalized to `application.yml`.
 *   **Deeper YAML Parsing**: `YamlParserService` is implemented for basic parsing. Future work involves identifying specific YAML files within user projects that require deep parsing for meaningful data extraction and integrating this service into the main analysis flow where appropriate.
 *   Support for private Git repositories.
 *   Performance optimizations for very large codebases.

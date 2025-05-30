@@ -23,6 +23,7 @@
     *   **Visual representations of database interactions, including schema diagrams and an entity-centric view of DAO/Repository operations.**
     *   A **microservice/project capability overview**.
     *   Gherkin feature files display.
+    *   **Comprehensive PCI/PII scan results, identifying potential sensitive data exposure across the entire codebase (not limited to logs).**
 5.  Provide a **centralized documentation dashboard** with sidebar navigation.
 
 ---
@@ -63,6 +64,7 @@
     *   **Database View (Entity-centric view of DAO interactions, detailed operations table)**
     *   Classes (Detailed class browser)
     *   Gherkin Features
+    *   **PCI/PII Scan (New): Displays findings of potential PCI/PII data across the repository, with details on file, line, and matched text. Patterns are configurable via `application.yml`.**
 *   Export options (Future Enhancement)
 *   Publish to Confluence (Future Enhancement)
 *   **Logger Insights**:
@@ -102,6 +104,7 @@
         *   **Presents an "Entities and Interacting Classes" view using `analysisResult.dbAnalysis.classesByEntity`.**
         *   **Shows a "Detailed Operations by DAO/Repository Class" table (with method names) using `analysisResult.dbAnalysis.operationsByClass`.**
         *   **Backend `DaoAnalysisServiceImpl` now returns `DbAnalysisResult` and filters redundant interfaces.**
+- **PCI/PII Scanning (New Feature)**: Added a comprehensive PCI/PII scanning capability that analyzes all text-based files in the repository (not just logs) for potential sensitive data exposure. Findings are presented in a dedicated UI tab. The detection patterns for PII and PCI data are configurable via the backend's `application.yml` file.
 
 ## Known Limitations & TODOs (Summary)
 

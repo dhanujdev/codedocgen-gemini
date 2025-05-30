@@ -44,6 +44,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
         *   `operationsByClass` (Map<String, List<DaoOperationDetail>>): DAO operations grouped by class FQN.
         *   `classesByEntity` (Map<String, Set<String>>): Map of Entity Name to a Set of FQNs of classes operating on that entity.
     *   **`logStatements` (List<LogStatement>): Added. Contains all detected log statements with PII/PCI risk analysis.**
+    *   **`piiPciFindings` (List<PiiPciFinding>): New. Contains all detected PII/PCI findings from the repository scan.**
 *   **`MavenExecutionResult.java`:** For results of `mvn` commands.
 
 ### 2.3. Models - `com.codedocgen.model`
@@ -57,6 +58,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **`DbAnalysisResult.java`:** New DTO holding `operationsByClass` and `classesByEntity` maps (see above).
 *   **`LogVariable.java`:** Added. Fields: `name`, `type`, `isPii`, `isPci`.
 *   **`LogStatement.java`:** Added. Fields: `id`, `className`, `line`, `level`, `message`, `variables` (List<LogVariable>), `isPiiRisk`, `isPciRisk`.
+*   **`PiiPciFinding.java`:** New. Fields: `filePath`, `lineNumber`, `columnNumber`, `findingType`, `matchedText`.
 
 ### 2.4. Services - `com.codedocgen.service` & `com.codedocgen.service.impl`
 
@@ -79,6 +81,11 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Distinguishes between PII-specific risks, PCI-specific risks, and general sensitive data risks (which flag both PII and PCI).
     *   Populates `LogStatement` and `LogVariable` objects with findings.
     *   **PII/PCI keyword regex patterns are now loaded from `application.yml`, allowing for configuration without recompiling.**
+    *   **`PiiPciDetectionService` / `PiiPciDetectionServiceImpl`:** New service.
+        *   Scans the entire repository (text-based files) for potential PII and PCI data.
+        *   Uses configurable regex patterns loaded from `application.yml` (e.g., `pii.patterns.EMAIL`, `pci.patterns.VISA`).
+        *   Excludes common binary file types and irrelevant directories (e.g., `.git`, `target`, `build`).
+        *   Returns a list of `PiiPciFinding` objects.
     *   **`YamlParserService` / `YamlParserServiceImpl`:** Newly added. Provides a basic service to parse a YAML file (given its path) into a `Map<String, Object>` using SnakeYAML. This can be leveraged for deeper analysis of project-specific YAML configurations if needed in the future.
 
 ### 2.5. Parsers - `com.codedocgen.parser`
@@ -92,7 +99,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
 
 ### 2.6. Controller - `com.codedocgen.controller`
 
-*   **`AnalysisController.java`:** Orchestrates analysis, populates and returns `ParsedDataResponse` including `dbAnalysis` (with `operationsByClass` and `classesByEntity`).
+*   **`AnalysisController.java`:** Orchestrates analysis, populates and returns `ParsedDataResponse` including `dbAnalysis` (with `operationsByClass` and `classesByEntity`) and `piiPciFindings`.
 
 ## 3. Frontend Details (`codedocgen-frontend`)
 
@@ -124,6 +131,11 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Provides filters for log level (via an MUI `Select` dropdown), PII risk, and PCI risk, plus a search field.
     *   Allows toggling of PII/PCI risk filters.
     *   Includes PDF export functionality for the filtered log view.
+*   **`PiiPciScanPage.js`:** New page.
+    *   Displays a table of PII/PCI findings from `analysisData.piiPciFindings`.
+    *   Each row is expandable to show the full matched text.
+    *   Provides search and filter capabilities for file path, finding type, and matched text.
+    *   Includes "Expand All" and "Collapse All" buttons.
 *   **`DiagramViewer.js`:** Reusable component for rendering SVG diagrams. (Changed from .tsx)
 *   **`services/api.js`:** Axios service.
 *   **`constants/uiConstants.js`:** For `BACKEND_STATIC_BASE_URL`.
@@ -153,6 +165,11 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **Detailed API Specification Display.**
 *   **Support for JAX-WS `@WebMethod` and improved `@RequestMapping` handling.**
 *   **Enhanced documentation summaries with method calls and tech stack details.**
+*   **Comprehensive PII/PCI Scanning:** New feature.
+    *   Repository-wide scanning for PII/PCI data in text files using configurable regex patterns.
+    *   Exclusion of binary files and common non-source directories.
+    *   Dedicated UI page (`PiiPciScanPage.js`) with display, search, filtering, and expandable details for findings.
+*   **Sidebar updated with a new "PCI/PII Scan" tab.**
 
 ## 5. Build Status
 
@@ -165,6 +182,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Deeper YAML parsing if used for project configuration.
     *   **`DaoAnalyzer.java`**: Handle more complex cases of SQL in variables or constructed dynamically (currently basic support).
     *   **`LoggerInsightsServiceImpl.java`**: Continuously refine and expand PII/PCI keyword patterns based on real-world examples and feedback. ~~Consider externalizing patterns for easier configuration.~~ **Patterns are now externalized to `application.yml`.**
+    *   **`PiiPciDetectionServiceImpl.java`**: Ensure robust exclusion of binary/irrelevant files and optimize regex performance for large repositories. Patterns are externalized to `application.yml`.
     *   [COMPLETED] Ensure `org.apache.cxf.jaxrs.swagger` package is available (related to `RestConfig.java` compilation error - resolved by adding `cxf-rt-rs-service-description-swagger` dependency).
     *   **Deeper YAML Parsing**: Basic `YamlParserService` implemented. Further integration and use depend on identifying specific YAML files within user projects that require deep parsing for meaningful data extraction.
 *   **Diagrams & Visualization:**
@@ -211,6 +229,12 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   `ProjectDetectorServiceImpl.java`: Added Gradle support for Spring Boot version detection (with regex fixes). - ✅ DONE
     *   `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced.
     *   `DaoAnalyzer.java`: Basic support for SQL in variables.
+- **New Feature: Comprehensive PII/PCI Scanning**:
+    *   Added `PiiPciDetectionService` and its implementation to scan the entire repository for PII/PCI data using configurable patterns from `application.yml`.
+    *   New `PiiPciFinding` model created.
+    *   `ParsedDataResponse` updated to include `piiPciFindings`.
+    *   Frontend `PiiPciScanPage.js` created to display these findings with search and filtering capabilities.
+    *   Sidebar updated with a new "PCI/PII Scan" tab.
 
 (Removed the old "New Feature: DAO/JDBC Analysis" section as its content is now integrated above and in the main sections) 
 

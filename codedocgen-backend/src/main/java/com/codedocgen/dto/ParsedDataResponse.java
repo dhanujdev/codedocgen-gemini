@@ -6,6 +6,7 @@ import com.codedocgen.model.DiagramType;
 import com.codedocgen.model.DaoOperationDetail;
 import com.codedocgen.model.DbAnalysisResult;
 import com.codedocgen.model.LogStatement;
+import com.codedocgen.model.PiiPciFinding;
 import lombok.Data;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,7 @@ public class ParsedDataResponse {
     private String dbDiagramPath; // Path to database schema diagram
     private DbAnalysisResult dbAnalysis; // New field for the comprehensive DB analysis
     private List<LogStatement> logStatements; // Added field for log statements
+    private List<PiiPciFinding> piiPciFindings; // New field
 
     // Consider adding fields for call flows, DAO info, etc., as parsing capabilities are built.
 
@@ -59,5 +61,13 @@ public class ParsedDataResponse {
 
     public void setLogStatements(List<LogStatement> logStatements) {
         this.logStatements = logStatements;
+    }
+
+    public List<PiiPciFinding> getPiiPciFindings() {
+        return piiPciFindings;
+    }
+
+    public void setPiiPciFindings(List<PiiPciFinding> piiPciFindings) {
+        this.piiPciFindings = piiPciFindings;
     }
 } 

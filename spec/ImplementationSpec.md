@@ -40,6 +40,7 @@ codedocgen-backend/
 │   │   │   ├── DocumentationServiceImpl.java // Generates project summaries, reads WSDL/XSD, Gherkin.
 │   │   │   ├── DaoAnalysisServiceImpl.java   // Implements DaoAnalysisService, returns DbAnalysisResult
 │   │   │   ├── LoggerInsightsServiceImpl.java // Analyzes logs for PII/PCI, patterns loaded from application.yml
+│   │   │   ├── PiiPciDetectionServiceImpl.java // New: Scans entire repo for PII/PCI based on configurable patterns
 │   │   │   └── YamlParserServiceImpl.java   // New: Basic YAML file parsing service
 │   │   ├── GitService.java
 │   │   ├── ProjectDetectorService.java
@@ -49,6 +50,7 @@ codedocgen-backend/
 │   │   ├── DocumentationService.java
 │   │   ├── DaoAnalysisService.java       // Interface method analyzeDbOperations returns DbAnalysisResult
 │   │   ├── LoggerInsightsService.java    // Interface for logger analysis
+│   │   ├── PiiPciDetectionService.java   // New: Interface for PII/PCI repo scanning
 │   │   └── YamlParserService.java        // New: Interface for YAML parsing
 │   ├── parser/
 │   │   ├── CallFlowAnalyzer.java      // Performs DFS to build call flows from method metadata.
@@ -65,9 +67,10 @@ codedocgen-backend/
 │       ├── EndpointMetadata.java
 │       ├── DiagramType.java
 │       ├── DaoOperationDetail.java  // Model for DAO operations
+│       ├── PiiPciFinding.java       // New: Model for a single PII/PCI finding
 │       └── DbAnalysisResult.java      // New DTO: holds operationsByClass and classesByEntity maps
 ├── src/main/resources/
-│   └── application.yml              // Includes logging levels for specific classes (e.g., ClassMetadataVisitorLogger)
+│   └── application.yml              // Includes logging levels for specific classes (e.g., ClassMetadataVisitorLogger), PII/PCI patterns for LoggerInsights and PiiPciDetectionService
 ├── pom.xml
 └── README.md
 
@@ -98,6 +101,7 @@ codedocgen-frontend/
 │   │   ├── DatabasePage.js         // Updated to use DbAnalysisResult for entity-centric view & detailed ops
 │   │   ├── GherkinPage.js
 │   │   ├── ClassesPage.js
+│   │   ├── PiiPciScanPage.js       // New: Page for displaying comprehensive PII/PCI scan results
 │   │   └── LoggerInsightsPage.js   // Page for displaying logger insights with new features
 │   ├── services/
 │   │   └── api.js
@@ -129,45 +133,32 @@ codedocgen-frontend/
 9. Iteration 9: Generate Swagger/OpenAPI + project summary. - ✅ DONE
 10. Iteration 10: Build full UI with sidebar navigation. - ✅ DONE (Database page updated for new DbAnalysisResult structure)
 11. Iteration 11: Export to Confluence + PDF/HTML - (Future Enhancement)
-12. Iteration 12: Logger Insights Feature
-    *   **Backend API**: The existing `/api/analysis/analyze` endpoint's `ParsedDataResponse` now includes `logStatements` (List<LogStatement>). The `LogStatement` and `LogVariable` models have been updated:
+12. Iteration 12: Logger Insights Feature - ✅ DONE (Patterns configurable via application.yml)
+13. Iteration 13: Comprehensive PII/PCI Scanning (New Feature)
+    *   **Backend API**: The `/api/analysis/analyze` endpoint's `ParsedDataResponse` now includes `piiPciFindings` (List<PiiPciFinding>).
         ```java
-        // com.codedocgen.model.LogVariable
-        public class LogVariable {
-            private String name;
-            private String type;
-            private boolean isPii; // Changed from isSensitive
-            private boolean isPci; // Added
-            // ...getters/setters...
-        }
-
-        // com.codedocgen.model.LogStatement
-        public class LogStatement {
-            private String id;
-            private String className;
-            private int line;
-            private String level;
-            private String message;
-            private List<LogVariable> variables;
-            private boolean isPiiRisk; // Changed from isPIIRisk
-            private boolean isPciRisk; // Added
+        // com.codedocgen.model.PiiPciFinding
+        public class PiiPciFinding {
+            private String filePath;
+            private int lineNumber;
+            private int columnNumber; 
+            private String findingType; // e.g., PII_SSN, PCI_CREDIT_CARD
+            private String matchedText;
             // ...getters/setters...
         }
         ```
-    *   **Backend Logic (`LoggerInsightsServiceImpl.java`)**:
-        *   Uses separate, comprehensive `Pattern` objects for PII-specific keywords and PCI-specific keywords, including common abbreviations and variations (e.g., `ssn`, `cardnbr`, `cvv`, `firstnm`, `addr`).
-        *   A third pattern for general sensitive terms (e.g., `password`, `token`) flags both PII and PCI risks for those terms.
-        *   **The regex strings for these patterns are now loaded from `application.yml` via `@Value` annotations, allowing for configuration without recompiling.**
-        *   Populates `isPii`, `isPci` in `LogVariable` and `isPiiRisk`, `isPciRisk` in `LogStatement` accordingly.
-    *   **Frontend Route**: `/logger-insights` (No change - handled by activeSection in App.js)
-    *   **Frontend Components (`LoggerInsightsPage.js`)**:
-        *   Displays logs in a collapsible table format (each row can be expanded).
-        *   Includes "Expand All" and "Collapse All" buttons to manage the expanded state of all log rows.
-        *   Provides a search input for class/message.
-        *   Features an MUI `Select` dropdown to filter logs by `level` (e.g., INFO, WARN, ERROR), populated dynamically from available log levels.
-        *   Includes `Switch` toggles for PII and PCI risk filtering.
-    *   **Sidebar**: "Logger Insights" tab in `Sidebar.js` navigates to this section.
-    *   **PDF Export**: Implement PDF export functionality using `jsPDF` or `html2pdf`.
+    *   **Backend Logic (`PiiPciDetectionServiceImpl.java`)**:
+        *   Scans all text-based files in the cloned repository.
+        *   Uses configurable regex patterns for PII (e.g., SSN, Email) and PCI (e.g., Credit Card numbers) data.
+        *   Patterns (map of type to regex string) are loaded from `application.yml` via `@Value` (e.g., `pii.patterns.EMAIL`, `pci.patterns.VISA`).
+        *   Excludes common binary file types and directories like `.git`, `target`, `build`, `node_modules`.
+        *   Populates `PiiPciFinding` objects with details of each match.
+    *   **Frontend Route**: `/pii-pci-scan` (Handled by `activeSection` in `App.js` via Sidebar)
+    *   **Frontend Components (`PiiPciScanPage.js`)**:
+        *   Displays findings in a collapsible table (each row can be expanded to show full matched text).
+        *   Provides search/filter capabilities for file path, finding type, and matched text.
+        *   Includes "Expand All" / "Collapse All" buttons.
+    *   **Sidebar**: New "PCI/PII Scan" tab in `Sidebar.js` navigates to this section.
 
 /*
 ====================================
@@ -215,23 +206,21 @@ codedocgen-frontend/
     *   Generates Class, Component, Usecase, Sequence, ERD, Database Schema diagrams as SVGs.
     *   Enhanced Component and Usecase diagrams for SOAP/legacy systems.
 
-5.  **Spring Boot Integration (Backend & Frontend):**
+5.  **Logger Insights (Backend `LoggerInsightsServiceImpl`, Frontend `LoggerInsightsPage`):**
+    *   Analysis of log statements for PII/PCI risks.
+    *   Detection patterns configurable via `application.yml`.
+    *   Dedicated UI page with filtering and expandable details.
+
+6.  **Comprehensive PII/PCI Scanning (Backend `PiiPciDetectionServiceImpl`, Frontend `PiiPciScanPage`):**
+    *   Scans entire repository (text files) for PII/PCI data using configurable regex patterns from `application.yml`.
+    *   Excludes binary files and irrelevant directories.
+    *   Results displayed in a new dedicated UI tab (`PiiPciScanPage.js`) with search, filtering, and expandable details for each finding.
+    *   New `PiiPciFinding.java` model and `PiiPciDetectionService.java` interface added.
+    *   `ParsedDataResponse.java` updated to include `List<PiiPciFinding>`.
+
+7.  **Spring Boot Integration (Backend & Frontend):**
     *   Accurate Spring Boot project and version detection (from `pom.xml`, `build.gradle`, `build.gradle.kts`).
     *   Information displayed in UI and used in summaries.
-
-6.  **Frontend Enhancements:**
-    *   **UI Framework**: Standardized on Material UI (Primary) for a consistent look and feel and responsive design.
-    *   **Responsiveness**: Addressed layout issues to ensure the main content area correctly utilizes available screen width, particularly on wide screens or when zoomed out.
-    *   **Call Flow Page (`CallFlowPage.js`):**
-        *   Displays sequence diagrams and raw call steps.
-        *   Integrates `FlowExplorer.tsx` for expandable/collapsible detailed flow steps.
-        *   **Features `generateFlowDisplayName` helper function to parse full Java method signatures (including parameters with types and names) and generate human-readable titles for diagrams and flow step details. This addresses previous issues with overly long or unparsed signature displays.**
-    *   **Database Page (`DatabasePage.js`):**
-        *   Displays schema diagram.
-        *   **Renders new "Entities and Interacting DAO/Repository Classes" section by iterating `analysisResult.dbAnalysis.classesByEntity`.**
-        *   **Updates "Detailed Operations by DAO/Repository Class" section using `analysisResult.dbAnalysis.operationsByClass` and adds a method name column.**
-        *   Adjusts initial data check to use `analysisResult.dbAnalysis`.
-    *   General Diagram Display (`DiagramViewer.tsx`, `DiagramsPage.js`).
 
 **TODOs (from codebase - to be addressed):**
 *   **Backend:**
@@ -277,6 +266,7 @@ codedocgen-frontend/
 *   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries (including called methods, external calls, and tech stack details from available data), finds feature/WSDL/XSD files.
 *   **`DaoAnalysisService` / `DaoAnalysisServiceImpl`:** // Implements DaoAnalysisService, returns DbAnalysisResult
 *   **`LoggerInsightsService` / `LoggerInsightsServiceImpl`:** // Analyzes logs for PII/PCI, patterns loaded from application.yml
+*   **`PiiPciDetectionService` / `PiiPciDetectionServiceImpl`:** // New: Scans entire repo for PII/PCI based on configurable patterns
 *   **`YamlParserService` / `YamlParserServiceImpl`:** // New: Basic YAML file parsing service
 
 ### 2.5. Parsers - `com.codedocgen.parser`
