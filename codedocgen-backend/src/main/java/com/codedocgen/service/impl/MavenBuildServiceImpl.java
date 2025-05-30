@@ -4,10 +4,12 @@ import com.codedocgen.dto.MavenExecutionResult;
 import com.codedocgen.service.MavenBuildService;
 import com.codedocgen.util.JavaVersionUtil;
 import com.codedocgen.util.SystemInfoUtil;
+import com.codedocgen.config.TruststoreConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -24,9 +26,19 @@ public class MavenBuildServiceImpl implements MavenBuildService {
 
     private static final Logger logger = LoggerFactory.getLogger(MavenBuildServiceImpl.class);
 
+    @Value("${codedocgen.maven.settings.xml.path:#{null}}")
+    private String mavenSettingsXmlPath;
+
+    private final TruststoreConfig truststoreConfig;
+
     // Configuration for JDK paths. Example: app.jdk.paths.8=/usr/lib/jvm/java-8,app.jdk.paths.11=/usr/lib/jvm/java-11
     @Value("#{${app.jdk.paths:{}}}") // Default to empty map if not configured
     private Map<String, String> configuredJdkPaths;
+
+    @Autowired
+    public MavenBuildServiceImpl(TruststoreConfig truststoreConfig) {
+        this.truststoreConfig = truststoreConfig;
+    }
 
     @Override
     public MavenExecutionResult runMavenCommandWithAutoDetect(File projectDir, String... goals) throws IOException, InterruptedException {
@@ -56,6 +68,39 @@ public class MavenBuildServiceImpl implements MavenBuildService {
         String mvnCommand = SystemInfoUtil.isWindows() ? "mvn.cmd" : "mvn";
         List<String> commandParts = new ArrayList<>();
         commandParts.add(mvnCommand);
+
+        // Add settings.xml if configured
+        if (mavenSettingsXmlPath != null && !mavenSettingsXmlPath.trim().isEmpty()) {
+            File settingsFile = new File(mavenSettingsXmlPath);
+            if (settingsFile.exists() && settingsFile.isFile()) {
+                commandParts.add("--settings");
+                commandParts.add(settingsFile.getAbsolutePath());
+                logger.info("Using Maven settings file: {}", settingsFile.getAbsolutePath());
+            } else {
+                logger.warn("Maven settings file specified but not found or not a file: {}. Proceeding without custom settings.", mavenSettingsXmlPath);
+            }
+        } else {
+            logger.info("No custom Maven settings file specified. Using default Maven settings.");
+        }
+        
+        // Add truststore properties if configured
+        String effectiveTrustStorePath = truststoreConfig.getEffectiveTrustStorePath();
+        String effectiveTrustStorePassword = truststoreConfig.getEffectiveTrustStorePassword();
+
+        if (effectiveTrustStorePath != null && !effectiveTrustStorePath.trim().isEmpty()) {
+            File tsFile = new File(effectiveTrustStorePath);
+            if (tsFile.exists() && tsFile.isFile()) {
+                commandParts.add("-Djavax.net.ssl.trustStore=" + tsFile.getAbsolutePath());
+                logger.info("Setting javax.net.ssl.trustStore to: {}", tsFile.getAbsolutePath());
+                if (effectiveTrustStorePassword != null) {
+                    commandParts.add("-Djavax.net.ssl.trustStorePassword=" + effectiveTrustStorePassword);
+                    logger.info("Setting javax.net.ssl.trustStorePassword.");
+                }
+            } else {
+                 logger.warn("Effective truststore path {} configured but file does not exist. Skipping truststore JVM args for Maven.", effectiveTrustStorePath);
+            }
+        }
+
         commandParts.addAll(Arrays.asList(goalsForExplicit));
 
         logger.info("Executing Maven command: {} in directory: {} (explicit version path)", String.join(" ", commandParts), projectDir.getAbsolutePath());

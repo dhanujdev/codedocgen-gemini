@@ -176,6 +176,8 @@ codedocgen-frontend/
 1.  **Symbol Resolution Engine (Backend - `JavaParserServiceImpl`):**
     *   Integrated JavaSymbolSolver with comprehensive type solvers.
     *   Pre-compilation step (`mvn compile`) for generated sources.
+        *   Maven commands now utilize a `settings.xml` file if specified in `codedocgen`'s configuration (`codedocgen.maven.settings.xml.path`).
+        *   Maven execution environment is configured with truststore details (`truststore.jks` path and password) from `codedocgen`'s SSL configuration (`server.ssl.trust-store`, `server.ssl.trust-store-password`). This is managed by a new `TruststoreConfig.java` class and applied by `MavenBuildServiceImpl`.
     *   FQN-centric identification.
     *   Robust fallbacks for unresolved calls.
     *   Accurate Class Type Determination.

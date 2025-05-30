@@ -65,6 +65,8 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **`GitService` / `GitServiceImpl`:** Clones and cleans Git repos.
 *   **`ProjectDetectorService` / `ProjectDetectorServiceImpl`:** Detects build tool, Spring Boot presence, and version (supports `pom.xml`, `build.gradle`, `build.gradle.kts`).
 *   **`JavaParserService` / `JavaParserServiceImpl`:** Core parsing engine using JavaParser and **JavaSymbolSolver**.
+    *   Maven commands executed during parsing now utilize a `settings.xml` file if specified via `codedocgen.maven.settings.xml.path`.
+    *   The Maven execution environment is also configured with truststore details (`truststore.jks` and password) from `codedocgen`'s SSL properties (`server.ssl.trust-store`, `server.ssl.trust-store-password`), managed by `TruststoreConfig.java` and applied via `MavenBuildServiceImpl`.
 *   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:** Extracts REST and SOAP (e.g. `@WebMethod`) endpoint info.
 *   **`DiagramService` / `DiagramServiceImpl`:** Generates Class, Component, Usecase, Sequence, ERD, and DB Schema diagrams as SVGs.
 *   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries (including called methods, external calls, and tech stack details from available data), finds feature/WSDL/XSD files.
@@ -206,6 +208,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
 - `svg-viewer.html` for standalone SVG viewing.
 - Sequence diagrams use quoted FQNs.
 - **Symbol Solver & Pre-compilation (Backend)**: `mvn compile` pre-step for enhanced symbol resolution.
+    *   Maven commands now use `settings.xml` (if configured) and apply `codedocgen`'s truststore settings for the execution environment.
 - **WSDL & XSD Deep Parsing (Frontend & Backend)**.
 - **Call Flow UI Enhancements (Frontend)**:
     - Call flows in `FlowExplorer.tsx` are now displayed as a clean, numbered plaintext list.

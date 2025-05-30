@@ -135,6 +135,7 @@ npm start
     - Significant improvements to responsiveness, ensuring the main content area utilizes available screen space effectively, especially on wider screens and when zoomed out.
 - **Major Backend Overhaul for Accuracy:**
     - Implemented robust Java symbol resolution, significantly improving method call detection, type resolution, and overall code understanding.
+      - Backend Maven commands for parsing now utilize a configured `settings.xml` and apply the project's truststore settings, ensuring correct behavior in secured environments.
     - Enhanced `CallFlowAnalyzer` to produce more accurate sequence diagrams and raw call steps.
     - Refined class type determination and DAO analysis.
 - **Frontend Diagram & Call Flow Improvements:**

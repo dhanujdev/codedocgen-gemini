@@ -33,6 +33,7 @@
 *   **Backend**: Java 21, Spring Boot (Maven)
 *   **Frontend**: React, Material UI (Primary), Axios
 *   **Parser Tools**: JavaParser (with symbol resolution), Reflection, Custom WSDL/XML parsers.
+    *   Maven execution during Java parsing now respects a configured `settings.xml` and applies `codedocgen`'s truststore settings (`truststore.jks` and password).
 *   **Diagram Generator**: PlantUML (rendered to SVG)
 *   **API Visualization**: Swagger UI + custom WSDL/XSD explorer.
 *   **Build Tool**: Maven
@@ -91,6 +92,7 @@
 - Standalone SVG viewer (`svg-viewer.html`).
 - **WSDL/XSD Parsing**: Deep parsing for detailed WSDL/XSD display.
 - **Symbol Resolution Enhancement**: `mvn compile` pre-step for improved accuracy.
+    *   This step now also incorporates the project-specific `settings.xml` (if configured) and applies the `codedocgen` truststore for secure connections during dependency resolution or plugin execution.
 - **Call Flow Display**: Dedicated page with sequence diagrams.
 - **Enhanced Component Diagram Generation**: Better SOAP/legacy support.
 - **Complete Usecase Diagram Redesign**: Multi-level use cases, SOAP support.

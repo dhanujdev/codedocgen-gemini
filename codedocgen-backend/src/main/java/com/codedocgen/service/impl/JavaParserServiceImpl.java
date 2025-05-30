@@ -80,6 +80,8 @@ public class JavaParserServiceImpl implements JavaParserService {
             boolean isGradleProject = gradleBuildFile.exists() || gradleKtsBuildFile.exists();
             boolean isMavenProject = pomFile.exists() && !isGradleProject; // Prefer Gradle if both somehow exist
 
+            CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();
+
             if (isGradleProject) {
                 logger.info("Detected Gradle project in {}. Running Gradle commands.", projectDir.getAbsolutePath());
                 String gradleExecutable;
@@ -202,31 +204,25 @@ public class JavaParserServiceImpl implements JavaParserService {
             } else if (isMavenProject) {
                 logger.info("Detected Maven project in {}. Running Maven commands.", projectDir.getAbsolutePath());
                 try {
-                    String osName = System.getProperty("os.name").toLowerCase();
-                    String mvnCommand = osName.contains("win") ? "mvn.cmd" : "mvn";
-                    
-                    ProcessBuilder pbClasspath = new ProcessBuilder(
-                        mvnCommand, "dependency:build-classpath",
+                    // No need to construct mvnCommand or ProcessBuilder here directly for classpath
+                    // Let MavenBuildService handle that with all configurations.
+                    logger.info("Building classpath using MavenBuildService.");
+                    MavenExecutionResult classpathResult = mavenBuildService.runMavenCommandWithExplicitVersion(projectDir, null, 
+                        "dependency:build-classpath", 
                         "-Dmdep.outputFile=" + CLASSPATH_OUTPUT_FILE,
                         "-Dmdep.pathSeparator=" + File.pathSeparator,
                         "-q"
                     );
-                    pbClasspath.directory(projectDir);
-                    pbClasspath.redirectErrorStream(true);
-                    logger.info("Executing Maven command: {}", String.join(" ", pbClasspath.command()));
-                    Process processClasspath = pbClasspath.start();
-                    StringBuilder mavenClasspathOutput = new StringBuilder();
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(processClasspath.getInputStream(), StandardCharsets.UTF_8))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            mavenClasspathOutput.append(line).append(System.lineSeparator());
-                        }
-                    }
-                    int classpathExitCode = processClasspath.waitFor();
-                    logger.info("Maven 'dependency:build-classpath' finished with exit code: {}. Output: {}", classpathExitCode, mavenClasspathOutput.toString());
+                    logger.info("Maven 'dependency:build-classpath' finished with exit code: {}. Output: {}", classpathResult.getExitCode(), classpathResult.getOutput());
 
                     logger.info("Attempting to compile the project via MavenBuildService.");
-                    MavenExecutionResult compileResult = mavenBuildService.runMavenCommandWithExplicitVersion(projectDir, (String) null, "compile", "-DskipTests", "-q", "-Dmaven.compiler.failOnError=false", "-Dmaven.compiler.failOnWarning=false");
+                    MavenExecutionResult compileResult = mavenBuildService.runMavenCommandWithExplicitVersion(projectDir, (String) null, 
+                        "compile", 
+                        "-DskipTests", 
+                        "-q", 
+                        "-Dmaven.compiler.failOnError=false", 
+                        "-Dmaven.compiler.failOnWarning=false"
+                    );
                     logger.info("Maven 'compile' command finished with exit code: {}. Output: {}", compileResult.getExitCode(), compileResult.getOutput());
 
                     if (!compileResult.isSuccess()) {
@@ -242,8 +238,6 @@ public class JavaParserServiceImpl implements JavaParserService {
                 logger.warn("No pom.xml or build.gradle/build.gradle.kts file found in {}. Skipping build system pre-compile and classpath build steps. Resolution will be limited.", projectDir.getAbsolutePath());
             }
 
-            CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();
-            
             // Add ReflectionTypeSolver for JDK classes - prefer classloader
             logger.info("Attempting to add ReflectionTypeSolver (preferring context classloader).");
             try {
