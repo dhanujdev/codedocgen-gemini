@@ -26,3 +26,18 @@ app:
     \b(creditcard|credit_card|cardnum|card_num|cardnbr|ccnum|ccn|cvv|cvc|csc|cardverification|verificationcode|securitycode|cardsecuritycode|pan|primaryaccountnumber|primary_account_number|cardholder|card_holder_name|expdate|expirationdate|exp_date|expirydate|trackdata|track_data|magstripe|magnetic_stripe|pinblock|pin_block|servicecode|service_code|cardnumber|paymentaccountnumber|payment_account_number|accountnum|acctnum|iban|internationalbankaccountnumber|bankaccount|bank_account|routingnumber|routing_number|achdata|ach_data|wiretransfer|wire_transfer|financialdata|financial_info|paymentinfo|payment_info|vcn|virtualcardnumber|virtual_card_number|tokenizedcard|tokenized_card)\b
   general-sensitive-keywords-regex: >-
     \b(password|passwd|secret|token|apikey)\b 
+  # Enterprise configuration settings
+  git:
+    username: ${GIT_USERNAME:} # Allow override via env var, empty by default
+    password: ${GIT_PASSWORD:} # Allow override via env var, empty by default
+  maven:
+    settings:
+      path: ${MAVEN_SETTINGS_PATH:} # e.g., /path/to/enterprise/settings.xml or classpath:enterprise-settings.xml
+    executable:
+      path: ${MAVEN_EXECUTABLE_PATH:mvn} # Defaults to 'mvn' assuming it's on PATH
+  graphviz:
+    dot:
+      executable:
+        path: ${GRAPHVIZ_DOT_PATH:dot} # Defaults to 'dot' assuming it's on PATH
+  ssl:
+    trust-store-password: ${SSL_TRUST_STORE_PASSWORD:changeit} # Default truststore password 

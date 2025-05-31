@@ -10,12 +10,18 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.util.FileCopyUtils;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -26,8 +32,11 @@ public class MavenBuildServiceImpl implements MavenBuildService {
 
     private static final Logger logger = LoggerFactory.getLogger(MavenBuildServiceImpl.class);
 
-    @Value("${codedocgen.maven.settings.xml.path:#{null}}")
-    private String mavenSettingsXmlPath;
+    @Value("${app.maven.settings.path:#{null}}")
+    private String mavenSettingsPath;
+    
+    @Value("${app.maven.executable.path:mvn}")
+    private String mavenExecutablePath;
 
     private final TruststoreConfig truststoreConfig;
 
@@ -65,22 +74,59 @@ public class MavenBuildServiceImpl implements MavenBuildService {
             return new MavenExecutionResult( -1, "Project directory not found: " + projectDir.getAbsolutePath());
         }
 
-        String mvnCommand = SystemInfoUtil.isWindows() ? "mvn.cmd" : "mvn";
+        // Use the executable command helper to get OS-aware mvn command
+        String mvnCommand = SystemInfoUtil.getExecutableCommand(mavenExecutablePath, SystemInfoUtil.isWindows() ? "mvn.cmd" : "mvn");
         List<String> commandParts = new ArrayList<>();
         commandParts.add(mvnCommand);
 
-        // Add settings.xml if configured
-        if (mavenSettingsXmlPath != null && !mavenSettingsXmlPath.trim().isEmpty()) {
-            File settingsFile = new File(mavenSettingsXmlPath);
-            if (settingsFile.exists() && settingsFile.isFile()) {
-                commandParts.add("--settings");
-                commandParts.add(settingsFile.getAbsolutePath());
-                logger.info("Using Maven settings file: {}", settingsFile.getAbsolutePath());
+        // Process custom Maven settings file if configured
+        String resolvedSettingsPath = null;
+        File tempSettingsFile = null;
+        
+        if (mavenSettingsPath != null && !mavenSettingsPath.trim().isEmpty()) {
+            String settingsPath = mavenSettingsPath.trim();
+            
+            // Handle classpath resource
+            if (settingsPath.startsWith("classpath:")) {
+                String resourcePath = settingsPath.substring("classpath:".length());
+                try {
+                    Resource resource = new ClassPathResource(resourcePath);
+                    if (resource.exists()) {
+                        // Create temporary file
+                        tempSettingsFile = File.createTempFile("maven-settings", ".xml");
+                        tempSettingsFile.deleteOnExit();
+                        
+                        // Copy classpath resource to temporary file
+                        try (FileOutputStream output = new FileOutputStream(tempSettingsFile)) {
+                            FileCopyUtils.copy(resource.getInputStream(), output);
+                        }
+                        
+                        resolvedSettingsPath = tempSettingsFile.getAbsolutePath();
+                        logger.info("Copied classpath Maven settings from {} to temporary file: {}", resourcePath, resolvedSettingsPath);
+                    } else {
+                        logger.warn("Maven settings classpath resource not found: {}. Proceeding without custom settings.", resourcePath);
+                    }
+                } catch (IOException e) {
+                    logger.error("Failed to copy Maven settings from classpath resource: {}. Error: {}", resourcePath, e.getMessage(), e);
+                }
             } else {
-                logger.warn("Maven settings file specified but not found or not a file: {}. Proceeding without custom settings.", mavenSettingsXmlPath);
+                // Handle file path (absolute or relative)
+                File settingsFile = new File(settingsPath);
+                if (settingsFile.exists() && settingsFile.isFile()) {
+                    resolvedSettingsPath = settingsFile.getAbsolutePath();
+                    logger.info("Using Maven settings file: {}", resolvedSettingsPath);
+                } else {
+                    logger.warn("Maven settings file specified but not found or not a file: {}. Proceeding without custom settings.", settingsPath);
+                }
             }
         } else {
             logger.info("No custom Maven settings file specified. Using default Maven settings.");
+        }
+
+        // Add settings file argument if we have resolved a path
+        if (resolvedSettingsPath != null) {
+            commandParts.add("--settings");
+            commandParts.add(resolvedSettingsPath);
         }
         
         // Add truststore properties if configured
@@ -103,7 +149,11 @@ public class MavenBuildServiceImpl implements MavenBuildService {
 
         commandParts.addAll(Arrays.asList(goalsForExplicit));
 
-        logger.info("Executing Maven command: {} in directory: {} (explicit version path)", String.join(" ", commandParts), projectDir.getAbsolutePath());
+        // Log the command without sensitive info
+        String commandForLogging = String.join(" ", commandParts)
+                .replaceAll("-Djavax\\.net\\.ssl\\.trustStorePassword=[^ ]+", "-Djavax.net.ssl.trustStorePassword=******");
+        logger.info("Executing Maven command: {} in directory: {} (explicit version path)", commandForLogging, projectDir.getAbsolutePath());
+        
         if (detectedJavaVersion != null) {
             logger.info("Attempting to use explicitly provided Java version: {}", detectedJavaVersion);
         } else {
@@ -141,10 +191,21 @@ public class MavenBuildServiceImpl implements MavenBuildService {
         int exitCode = process.waitFor();
         logger.info("Maven command (explicit version path) finished with exit code: {}", exitCode);
 
+        // Restore original JAVA_HOME if we changed it
         if (originalJavaHome != null) {
             environment.put("JAVA_HOME", originalJavaHome);
         } else {
             environment.remove("JAVA_HOME");
+        }
+
+        // Clean up temporary settings file if we created one
+        if (tempSettingsFile != null && tempSettingsFile.exists()) {
+            try {
+                Files.delete(tempSettingsFile.toPath());
+                logger.debug("Deleted temporary Maven settings file: {}", tempSettingsFile.getAbsolutePath());
+            } catch (IOException e) {
+                logger.warn("Failed to delete temporary Maven settings file: {}", tempSettingsFile.getAbsolutePath(), e);
+            }
         }
 
         if (exitCode != 0) {
