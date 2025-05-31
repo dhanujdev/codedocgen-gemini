@@ -107,6 +107,29 @@ docker run -d -p 8081:8081 --name codedocgen-instance \
 ```
 (Note: `SPRING_APPLICATION_JSON` is a convenient way to pass multiple Spring Boot properties as a JSON string.)
 
+### Enterprise Configuration
+
+For enterprise deployments, you may need to configure the following additional environment variables:
+
+```bash
+docker run -d -p 8080:8080 --name codedocgen-instance \
+  -e GIT_USERNAME='your-git-username' \
+  -e GIT_PASSWORD='your-git-password' \
+  -e MAVEN_SETTINGS_PATH='/path/to/settings.xml' \
+  -e MAVEN_EXECUTABLE_PATH='/path/to/mvn' \
+  -e GRAPHVIZ_DOT_PATH='/path/to/dot' \
+  -e SSL_TRUST_STORE_PASSWORD='your-truststore-password' \
+  -v /path/to/host/truststore.jks:/app/truststore.jks \
+  -v /path/to/host/settings.xml:/app/settings.xml \
+  codedocgen-app
+```
+
+You would also need to update the Spring Boot configuration to use these mounted files:
+
+```bash
+-e SPRING_APPLICATION_JSON='{"server.ssl.trust-store":"/app/truststore.jks","app.maven.settings.path":"/app/settings.xml"}'
+```
+
 ### Application Properties
 
 Spring Boot properties can be configured through `application-production.yml` (or `.properties`) if you include such a file in `codedocgen-backend/src/main/resources/` before building the Docker image. The `SPRING_PROFILES_ACTIVE=production` environment variable will ensure this profile-specific configuration is loaded.
@@ -134,7 +157,37 @@ docker run -d -p 8080:8080 --name codedocgen-instance \
 ```
 Replace `/configured/repoStoragePath` and `/configured/outputBasePath` with the actual paths your Spring Boot application is configured to use (from `application-production.yml` or defaults).
 
-## 7. Troubleshooting
+## 7. Enterprise Security Considerations
+
+When deploying in an enterprise environment, consider the following:
+
+### SSL/TLS Configuration
+
+For secure HTTPS operations (especially when interacting with enterprise Git repositories), configure a truststore:
+
+1. **Create or obtain a truststore file** (typically `truststore.jks`) containing your organization's certificates.
+2. **Mount the truststore** into the container as shown in the enterprise configuration above.
+3. **Set the appropriate system properties** through environment variables:
+   - `server.ssl.trust-store=/path/to/mounted/truststore.jks`
+   - `app.ssl.trust-store-password=your-password`
+
+### Git Authentication
+
+For private repository access:
+
+1. **Securely provide Git credentials** via environment variables `GIT_USERNAME` and `GIT_PASSWORD`.
+2. **Consider using Docker secrets** for more secure credential management.
+3. **For GitHub Enterprise or similar** ensure your truststore contains their certificate chain.
+
+### Maven Configuration
+
+For enterprise Maven repositories:
+
+1. **Prepare a custom settings.xml** with your enterprise repository configuration.
+2. **Mount the settings.xml** into the container.
+3. **Configure the application** to use it via `app.maven.settings.path`.
+
+## 8. Troubleshooting
 
 *   **Build Failures:**
     *   Check for errors in the Docker build output. Common issues include network problems preventing dependency downloads, incorrect file paths, or syntax errors in the `Dockerfile`.
@@ -144,8 +197,14 @@ Replace `/configured/repoStoragePath` and `/configured/outputBasePath` with the 
     *   Ensure that the port you are trying to map (e.g., `8080`) is not already in use on your host machine.
 *   **Diagram Generation Issues:**
     *   If diagrams are not generating correctly at runtime, it might be related to the Graphviz installation or `GRAPHVIZ_DOT` path. The current `Dockerfile` attempts to handle this by installing Graphviz in the final image.
+    *   For enterprise deployments, ensure the configured `app.graphviz.dot.executable.path` is correct for your environment.
+*   **SSL/Trust Issues:**
+    *   If you encounter SSL validation errors when connecting to enterprise repositories, check that your truststore is correctly configured and mounted.
+    *   Verify the system properties are correctly set via environment variables.
+*   **Maven Repository Access:**
+    *   If you experience issues accessing enterprise Maven repositories, verify your `settings.xml` configuration and ensure network connectivity to the repository.
 
-## 8. Updating the Application
+## 9. Updating the Application
 
 To deploy an updated version of the application:
 

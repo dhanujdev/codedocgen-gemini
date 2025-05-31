@@ -171,13 +171,46 @@ codedocgen-frontend/
 - Frontend navigation via `Sidebar.js`.
 - WSDL/XSD display in `ApiSpecsPage.js`, OpenAPI via SwaggerUI.
 
+**Enterprise Readiness Features (Latest Update):**
+
+1. **Secure Git Integration (`GitServiceImpl`):**
+   * Support for authentication with private enterprise Git repositories.
+   * Username/password credentials support via `app.git.username` and `app.git.password` configuration properties.
+   * Secure credential handling with masked logging.
+
+2. **Custom Maven Integration (`MavenBuildServiceImpl`):**
+   * Support for enterprise Maven `settings.xml` files via `app.maven.settings.path` configuration.
+   * Handles both filesystem paths and classpath resources.
+   * Support for temporary file management for classpath resources.
+   * Properly masks sensitive information in logs.
+
+3. **SSL/TLS Trust Configuration (`TruststoreConfig`):**
+   * Robust loading of enterprise truststore.jks for HTTPS operations.
+   * Support for classpath and filesystem-based truststore files.
+   * Validation of truststore files before use.
+   * Early initialization with Spring's `@Order(0)`.
+   * Global system property configuration for all HTTPS operations.
+   * Fallback to app-level trust store password if server one is not set.
+
+4. **OS-Aware Path Management (`SystemInfoUtil`):**
+   * Enhanced OS detection with normalized return values.
+   * Path resolution for executables with proper OS-specific handling.
+   * Support for Windows, macOS, and Linux.
+   * Helper methods for checking if executables are available on PATH.
+
+5. **Graphviz Integration (`PlantUMLRenderer`):**
+   * Configurable dot executable path via `app.graphviz.dot.executable.path` property.
+   * Automatic fallback to common installation locations on Windows.
+   * Validation of the executable presence.
+   * System property configuration for PlantUML's Graphviz integration.
+
 **Core Parsing & Analysis Overhaul (Iterative):**
 
 1.  **Symbol Resolution Engine (Backend - `JavaParserServiceImpl`):**
     *   Integrated JavaSymbolSolver with comprehensive type solvers.
     *   Pre-compilation step (`mvn compile`) for generated sources.
-        *   Maven commands now utilize a `settings.xml` file if specified in `codedocgen`'s configuration (`codedocgen.maven.settings.xml.path`).
-        *   Maven execution environment is configured with truststore details (`truststore.jks` path and password) from `codedocgen`'s SSL configuration (`server.ssl.trust-store`, `server.ssl.trust-store-password`). This is managed by a new `TruststoreConfig.java` class and applied by `MavenBuildServiceImpl`.
+        *   Maven commands now utilize a `settings.xml` file if specified in `codedocgen`'s configuration (`app.maven.settings.path`).
+        *   Maven execution environment is configured with truststore details (`truststore.jks` path and password) from `codedocgen`'s SSL configuration (`server.ssl.trust-store`, `app.ssl.trust-store-password`). This is managed by the enhanced `TruststoreConfig.java` class and applied by `MavenBuildServiceImpl`.
     *   FQN-centric identification.
     *   Robust fallbacks for unresolved calls.
     *   Accurate Class Type Determination.
