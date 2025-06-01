@@ -1,6 +1,7 @@
 package com.codedocgen.parser;
 
 import com.codedocgen.model.DaoOperationDetail;
+import com.codedocgen.model.DaoOperationType;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.Expression;
@@ -97,10 +98,11 @@ public class DaoAnalyzer {
     }
 
     private void addOperationDetail(List<DaoOperationDetail> operations, String methodName, String sqlQuery) {
-        DaoOperationDetail.SqlOperationType operationType = extractSqlOperationType(sqlQuery);
+        DaoOperationDetail.SqlOperationType sqlType = extractSqlOperationType(sqlQuery);
+        DaoOperationType daoType = convertSqlTypeToDaoType(sqlType);
         List<String> tables = extractTableNames(sqlQuery);
         // Avoid duplicate entries if the same query string appears multiple times
-        DaoOperationDetail newOp = new DaoOperationDetail(methodName, sqlQuery, operationType, tables);
+        DaoOperationDetail newOp = new DaoOperationDetail(methodName, sqlQuery, daoType, tables);
         if (!operations.contains(newOp)) {
             operations.add(newOp);
         }
@@ -164,6 +166,37 @@ public class DaoAnalyzer {
         }
 
         return tables.stream().distinct().collect(Collectors.toList());
+    }
+
+    // Helper method to convert SqlOperationType to DaoOperationType
+    private DaoOperationType convertSqlTypeToDaoType(DaoOperationDetail.SqlOperationType sqlType) {
+        if (sqlType == null) {
+            return DaoOperationType.UNKNOWN;
+        }
+        
+        switch (sqlType) {
+            case SELECT:
+                return DaoOperationType.QUERY;
+            case INSERT:
+                return DaoOperationType.SAVE;
+            case UPDATE:
+                return DaoOperationType.UPDATE;
+            case DELETE:
+                return DaoOperationType.DELETE;
+            case CREATE:
+                return DaoOperationType.CUSTOM;
+            case ALTER:
+                return DaoOperationType.CUSTOM;
+            case DROP:
+                return DaoOperationType.CUSTOM;
+            case TRUNCATE:
+                return DaoOperationType.CUSTOM;
+            case MERGE:
+                return DaoOperationType.UPDATE;
+            case UNKNOWN:
+            default:
+                return DaoOperationType.UNKNOWN;
+        }
     }
 
     public static class DaoAnalysisResult {

@@ -164,7 +164,10 @@ public class DiagramServiceImpl implements DiagramService {
                     plantUmlSource.append("  {method} ").append(sanitizePuml(method.getName()));
                     plantUmlSource.append("(");
                     if (method.getParameters() != null && !method.getParameters().isEmpty()){
-                        plantUmlSource.append(String.join(", ", method.getParameters().stream().map(this::sanitizePuml).toArray(String[]::new)));
+                        plantUmlSource.append(method.getParameters().stream()
+                            .map(Object::toString)
+                            .map(this::sanitizePuml)
+                            .collect(java.util.stream.Collectors.joining(", ")));
                     }
                     plantUmlSource.append(")");
                     if(method.getReturnType() != null && !method.getReturnType().equals("void")){

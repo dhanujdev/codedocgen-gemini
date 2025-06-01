@@ -2,11 +2,12 @@ package com.codedocgen.service.impl;
 
 import com.codedocgen.service.GitService;
 import com.codedocgen.util.JavaVersionUtil;
+import com.codedocgen.util.SystemInfoUtil;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.transport.CredentialsProvider;
-import org.eclipse.jgit.api.CloneCommand;
+import org.eclipse.jgit.lib.ProgressMonitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,7 +16,16 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Comparator;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * Implementation of the GitService for Git repository operations
+ */
 @Service
 public class GitServiceImpl implements GitService {
 
@@ -26,86 +36,123 @@ public class GitServiceImpl implements GitService {
     
     @Value("${app.git.password:}")
     private String gitPassword;
+    
+    @Value("${app.repoStoragePath:/tmp/repos}")
+    private String repoStoragePath;
+    
+    @Value("${app.git.shallowClone:true}")
+    private boolean shallowClone;
+    
+    @Value("${app.git.depth:1}")
+    private int cloneDepth;
+    
+    @Value("${app.git.cloneTimeout:300}")
+    private int cloneTimeout;
 
     @Override
-    public File cloneRepository(String repoUrl, String localPath) throws GitAPIException, IOException {
-        logger.info("Cloning repository from {} to {}", repoUrl, localPath);
+    public File cloneRepository(String repoUrl, String localPath, String branch, String username, String password) throws IOException {
+        logger.info("Cloning Git repository from URL: {}", repoUrl);
+        
+        CredentialsProvider credentialsProvider = null;
+        if (username != null && !username.isEmpty() && password != null) {
+            credentialsProvider = new UsernamePasswordCredentialsProvider(username, password);
+            logger.info("Using provided credentials for Git authentication");
+        }
+        
         File localDir = new File(localPath);
-        if (localDir.exists()) {
-            logger.warn("Local path {} already exists. Deleting it to ensure a fresh clone.", localPath);
-            deleteRepository(localDir);
+        if (!localDir.exists()) {
+            localDir.mkdirs();
         }
-        if (!localDir.mkdirs() && !localDir.exists()) {
-             logger.error("Could not create directory: {}", localDir.getAbsolutePath());
-            throw new IOException("Could not create directory: " + localDir.getAbsolutePath());
-        }
-
+        
         try {
-            // Set up credentials provider if both username and password are provided
-            CredentialsProvider credentialsProvider = null;
-            if (gitUsername != null && !gitUsername.isEmpty() && gitPassword != null && !gitPassword.isEmpty()) {
-                credentialsProvider = new UsernamePasswordCredentialsProvider(gitUsername, gitPassword);
-                logger.info("Using Git credentials for repository access (username: {})", gitUsername);
-            } else {
-                logger.info("No Git credentials provided, will attempt anonymous access to repository");
-            }
+            Git.cloneRepository()
+                .setURI(repoUrl)
+                .setDirectory(localDir)
+                .setProgressMonitor(new LoggingProgressMonitor())
+                .setCredentialsProvider(credentialsProvider)
+                .setBranch(branch != null && !branch.isEmpty() ? branch : null)
+                .call();
             
-            // Create clone command with credentials if available
-            CloneCommand cloneCommand = Git.cloneRepository()
-                    .setURI(repoUrl)
-                    .setDirectory(localDir)
-                    .setCloneAllBranches(false) // For initial scan, only main branch is usually enough
-                    .setDepth(1); // Shallow clone for speed, full history might not be needed for doc gen
-                    
-            // Set credentials provider if available
-            if (credentialsProvider != null) {
-                cloneCommand.setCredentialsProvider(credentialsProvider);
-            }
-            
-            // Execute clone
-            try (Git result = cloneCommand.call()) {
-                logger.info("Repository cloned successfully to: {}", result.getRepository().getDirectory().getParent());
-
-                // Detect and log Java version from pom.xml
-                File pomFile = new File(localDir, "pom.xml");
-                if (pomFile.exists()) {
-                    String detectedJavaVersion = JavaVersionUtil.detectJavaVersionFromPom(pomFile);
-                    if (detectedJavaVersion != null) {
-                        logger.info("Detected Java version {} for project in {}", detectedJavaVersion, localDir.getAbsolutePath());
-                    } else {
-                        logger.warn("Could not detect Java version from pom.xml in {}", localDir.getAbsolutePath());
-                    }
-                } else {
-                    logger.info("No pom.xml found in the root of the cloned repository at {}. Skipping Java version detection.", localDir.getAbsolutePath());
-                }
-
-                return localDir;
-            }
+            logger.info("Successfully cloned repository to: {}", localDir.getAbsolutePath());
+            return localDir;
         } catch (GitAPIException e) {
-            logger.error("Error cloning repository {}: {}", repoUrl, e.getMessage(), e);
-            // Attempt to clean up partially cloned directory
-            if (localDir.exists()) {
-                try {
-                    deleteRepository(localDir);
-                } catch (IOException ex) {
-                    logger.error("Failed to delete partially cloned directory {} after clone error: {}", localPath, ex.getMessage(), ex);
-                }
-            }
-            throw e;
+            logger.error("Error cloning Git repository", e);
+            throw new IOException("Failed to clone Git repository: " + e.getMessage(), e);
         }
     }
 
     @Override
-    public void deleteRepository(File repoDir) throws IOException {
-        if (repoDir != null && repoDir.exists()) {
-            logger.info("Deleting directory: {}", repoDir.getAbsolutePath());
-            try {
-                FileUtils.deleteDirectory(repoDir);
-                logger.info("Directory {} deleted successfully.", repoDir.getAbsolutePath());
-            } catch (IOException e) {
-                logger.error("Failed to delete directory {}: {}", repoDir.getAbsolutePath(), e.getMessage(), e);
-                throw e;
+    public boolean deleteRepository(File repositoryDir) {
+        logger.info("Deleting local Git repository: {}", repositoryDir.getAbsolutePath());
+        
+        if (!repositoryDir.exists()) {
+            logger.warn("Repository directory does not exist: {}", repositoryDir.getAbsolutePath());
+            return true; // Already deleted
+        }
+        
+        try {
+            Path pathToBeDeleted = Paths.get(repositoryDir.getAbsolutePath());
+            Files.walk(pathToBeDeleted)
+                .sorted(Comparator.reverseOrder())
+                .map(Path::toFile)
+                .forEach(File::delete);
+            
+            logger.info("Successfully deleted repository directory: {}", repositoryDir.getAbsolutePath());
+            return true;
+        } catch (IOException e) {
+            logger.error("Error deleting repository directory", e);
+            return false;
+        }
+    }
+
+    private static class LoggingProgressMonitor implements ProgressMonitor {
+        private static final Logger logger = LoggerFactory.getLogger(LoggingProgressMonitor.class);
+        private int totalWork;
+        private int completed;
+        private String task;
+        private long lastUpdate;
+        
+        @Override
+        public void start(int totalTasks) {
+            logger.info("Starting Git operation with {} total tasks", totalTasks);
+        }
+        
+        @Override
+        public void beginTask(String title, int totalWork) {
+            this.task = title;
+            this.totalWork = totalWork;
+            this.completed = 0;
+            this.lastUpdate = System.currentTimeMillis();
+            logger.info("Beginning task: {} (total work: {})", title, totalWork);
+        }
+        
+        @Override
+        public void update(int completed) {
+            this.completed += completed;
+            
+            // Only log every 3 seconds to avoid too many log messages
+            long now = System.currentTimeMillis();
+            if (now - lastUpdate > TimeUnit.SECONDS.toMillis(3)) {
+                int percentage = totalWork > 0 ? (this.completed * 100 / totalWork) : 0;
+                logger.info("Progress on {}: {}% ({}/{})", task, percentage, this.completed, totalWork);
+                lastUpdate = now;
             }
+        }
+        
+        @Override
+        public void endTask() {
+            logger.info("Task completed: {}", task);
+        }
+        
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+        
+        @Override
+        public void showDuration(boolean enabled) {
+            // Method added in newer JGit versions
+            // Just a no-op implementation for compatibility
         }
     }
 } 

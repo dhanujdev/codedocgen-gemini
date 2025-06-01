@@ -15,9 +15,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.KeyStore;
 
-/**
- * Configuration for the SSL/TLS truststore
- */
 @Configuration
 @Order(0) // Ensure this bean is initialized very early in the application startup process
 public class TruststoreConfig {
@@ -80,7 +77,7 @@ public class TruststoreConfig {
                 logger.error("Failed to initialize truststore from classpath resource: {}", trustStorePath, e);
                 // Fallback to using the path directly if copying fails, assuming it might be an absolute path
                 this.effectiveTrustStorePath = trustStorePath.substring("classpath:".length());
-                logger.warn("Falling back to using raw path (if absolute) for truststore due to copy error: {}", this.effectiveTrustStorePath);
+                 logger.warn("Falling back to using raw path (if absolute) for truststore due to copy error: {}", this.effectiveTrustStorePath);
             }
         } else if (trustStorePath != null) {
             // If not classpath:, assume it's a direct file path
@@ -97,9 +94,9 @@ public class TruststoreConfig {
         if (this.effectiveTrustStorePath != null) {
             File tsFile = new File(this.effectiveTrustStorePath);
             if (!tsFile.exists()) {
-                logger.warn("Effective truststore file does not exist at path: {}", this.effectiveTrustStorePath);
-                // Set to null if file doesn't exist to prevent Maven errors with non-existent paths
-                this.effectiveTrustStorePath = null; 
+                 logger.warn("Effective truststore file does not exist at path: {}", this.effectiveTrustStorePath);
+                 // Set to null if file doesn't exist to prevent Maven errors with non-existent paths
+                 this.effectiveTrustStorePath = null; 
             } else {
                 logger.info("Effective truststore path set to: {}", this.effectiveTrustStorePath);
                 if (this.effectiveTrustStorePassword != null) {
@@ -152,18 +149,10 @@ public class TruststoreConfig {
         }
     }
 
-    /**
-     * Gets the effective path to the truststore
-     * @return The effective truststore path
-     */
     public String getEffectiveTrustStorePath() {
         return effectiveTrustStorePath;
     }
 
-    /**
-     * Gets the effective password for the truststore
-     * @return The effective truststore password
-     */
     public String getEffectiveTrustStorePassword() {
         return effectiveTrustStorePassword;
     }

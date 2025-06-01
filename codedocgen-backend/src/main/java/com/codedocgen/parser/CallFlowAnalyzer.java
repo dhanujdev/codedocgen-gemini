@@ -3,6 +3,7 @@ package com.codedocgen.parser;
 import org.springframework.stereotype.Component;
 import com.codedocgen.model.ClassMetadata;
 import com.codedocgen.model.MethodMetadata;
+import com.codedocgen.model.ParameterMetadata;
 import java.util.*;
 import org.slf4j.Logger; // Uncomment if logger is used
 import org.slf4j.LoggerFactory; // Uncomment if logger is used
@@ -58,7 +59,10 @@ public class CallFlowAnalyzer {
                         totalEntryPointsAttempted++;
                         String entryPointBaseFQN = classFQN + "." + m.getName();
                         String entryPointDisplayFQN = entryPointBaseFQN + "(" +
-                                                    (m.getParameters() != null ? String.join(", ", m.getParameters()) : "") +
+                                                    (m.getParameters() != null ? 
+                                                     m.getParameters().stream()
+                                                     .map(param -> param.toString())
+                                                     .collect(java.util.stream.Collectors.joining(", ")) : "") +
                                                     ")";
                         logger.debug("Attempting DFS for entry point: {}", entryPointDisplayFQN);
                         logger.debug("  Entry point FQN for methodMap lookup: {}", entryPointBaseFQN);
@@ -245,25 +249,17 @@ public class CallFlowAnalyzer {
         // --- Parameter and local variable type tracking (uses FQNs from MethodMetadata) ---
         Map<String, String> paramTypeMap = new HashMap<>();
         if (currentMethodMeta.getParameters() != null) {
-            for (String param : currentMethodMeta.getParameters()) {
-                String[] parts = param.trim().split(" ");
-                if (parts.length == 2) {
-                    paramTypeMap.put(parts[1], parts[0]); // variable name -> type
-                } else if (parts.length == 1 && !parts[0].isEmpty()) {
-                    // Handle cases where parameter might just be a type (e.g. from some unresolved scenarios)
-                    // For now, we don't add these to paramTypeMap as they lack a name.
-                    logger.trace("DFS: Parameter '{}' in method lookup key '{}' seems to be type-only.", param, methodLookupKey);
-                }
+            for (ParameterMetadata param : currentMethodMeta.getParameters()) {
+                paramTypeMap.put(param.getName(), param.getType()); // variable name -> type
             }
         }
+        
         // Local variable extraction (if available in MethodMetadata)
         if (currentMethodMeta.getLocalVariables() != null) {
-            for (String localVar : currentMethodMeta.getLocalVariables()) {
-                String[] parts = localVar.trim().split(" ");
-                if (parts.length == 2) {
-                    paramTypeMap.put(parts[1], parts[0]);
-                    logger.debug("DFS: Found local variable '{}' of type '{}' in method '{}'", parts[1], parts[0], methodLookupKey);
-                }
+            for (MethodMetadata.VariableMetadata var : currentMethodMeta.getLocalVariables()) {
+                paramTypeMap.put(var.getName(), var.getType());
+                logger.debug("DFS: Found local variable '{}' of type '{}' in method '{}'", 
+                             var.getName(), var.getType(), methodLookupKey);
             }
         }
         // --- End parameter and local variable type tracking ---
@@ -271,7 +267,10 @@ public class CallFlowAnalyzer {
         String fqnForDisplay = (currentMethodMeta.getPackageName() != null && !currentMethodMeta.getPackageName().isEmpty() ? currentMethodMeta.getPackageName() + "." : "") +
                                 currentMethodMeta.getClassName() + "." +
                                 currentMethodMeta.getName() +
-                                "(" + (currentMethodMeta.getParameters() != null ? String.join(", ", currentMethodMeta.getParameters()) : "") + ")";
+                                "(" + (currentMethodMeta.getParameters() != null ? 
+                                      currentMethodMeta.getParameters().stream()
+                                      .map(param -> param.toString())
+                                      .collect(java.util.stream.Collectors.joining(", ")) : "") + ")";
         logger.debug("DFS: Current method display FQN: {}", fqnForDisplay);
 
         if (flow.isEmpty()) {
@@ -334,7 +333,10 @@ public class CallFlowAnalyzer {
                     String targetDisplayFQN = (targetMethodMeta.getPackageName() != null && !targetMethodMeta.getPackageName().isEmpty() ? targetMethodMeta.getPackageName() + "." : "") +
                                               targetMethodMeta.getClassName() + "." +
                                               targetMethodMeta.getName() +
-                                              "(" + (targetMethodMeta.getParameters() != null ? String.join(", ", targetMethodMeta.getParameters()) : "") + ")";
+                                              "(" + (targetMethodMeta.getParameters() != null ? 
+                                                    targetMethodMeta.getParameters().stream()
+                                                    .map(param -> param.toString())
+                                                    .collect(java.util.stream.Collectors.joining(", ")) : "") + ")";
                     
                     logger.debug("DFS: Attempt 1 Potential Match. Target display FQN: '{}'. Recursing with base key: '{}'", targetDisplayFQN, calledBaseFQN);
                     // flow.add(" -> " + targetDisplayFQN); // Added inside the recursive DFS call if new

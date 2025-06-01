@@ -2,8 +2,10 @@ package com.codedocgen.service.impl;
 
 import com.codedocgen.model.ClassMetadata;
 import com.codedocgen.model.DaoOperationDetail;
+import com.codedocgen.model.DaoOperationType;
 import com.codedocgen.model.DbAnalysisResult;
 import com.codedocgen.model.DiagramType;
+import com.codedocgen.model.FieldMetadata;
 import com.codedocgen.model.MethodMetadata;
 import com.codedocgen.parser.DaoAnalyzer;
 import com.codedocgen.service.DaoAnalysisService;
@@ -356,9 +358,10 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
                             }
 
                             if (sqlQuery != null && !sqlQuery.trim().isEmpty()) {
-                                DaoOperationDetail.SqlOperationType type = daoAnalyzer.extractSqlOperationType(sqlQuery);
+                                DaoOperationDetail.SqlOperationType sqlType = daoAnalyzer.extractSqlOperationType(sqlQuery);
+                                DaoOperationType daoType = convertSqlTypeToDaoType(sqlType);
                                 List<String> tables = daoAnalyzer.extractTableNames(sqlQuery);
-                                operations.add(new DaoOperationDetail(methodName, sqlQuery, type, tables));
+                                operations.add(new DaoOperationDetail(methodName, sqlQuery, daoType, tables));
                                 queryFoundInAnnotation = true;
                                 logger.debug("Found SQL in @Query for method {}: {}", methodName, sqlQuery);
                                 break;
@@ -397,14 +400,15 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
                         String entityName = extractEntityNameFromMethod(method.getName(), pattern);
                         
                         if (entityName != null && !entityName.isEmpty()) {
-                            DaoOperationDetail.SqlOperationType opType = inferOperationTypeFromMethodName(methodName);
+                            DaoOperationDetail.SqlOperationType sqlType = inferOperationTypeFromMethodName(methodName);
+                            DaoOperationType daoType = convertSqlTypeToDaoType(sqlType);
                             
-                            String syntheticQuery = createSyntheticQuery(opType, entityName);
+                            String syntheticQuery = createSyntheticQuery(sqlType, entityName, method.getName());
                             List<String> tables = Collections.singletonList(entityName);
                             
                             operations.add(new DaoOperationDetail(
                                     syntheticQuery, 
-                                    opType,
+                                    daoType,
                                     tables
                             ));
                             
@@ -543,18 +547,19 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
         }
     }
     
-    private String createSyntheticQuery(DaoOperationDetail.SqlOperationType opType, String tableName) {
-        switch (opType) {
+    private String createSyntheticQuery(DaoOperationDetail.SqlOperationType opType, String tableName, String methodName) {
+        DaoOperationDetail.SqlOperationType type = opType; // Unbox the enum to use in switch
+        switch (type) {
             case SELECT:
-                return "SELECT * FROM " + tableName;
+                return String.format("SELECT * FROM %s (based on method: %s)", tableName, methodName);
             case INSERT:
-                return "INSERT INTO " + tableName + " (...) VALUES (...)";
+                return String.format("INSERT INTO %s (...) VALUES (...) (based on method: %s)", tableName, methodName);
             case UPDATE:
-                return "UPDATE " + tableName + " SET ... WHERE ...";
+                return String.format("UPDATE %s SET ... WHERE ... (based on method: %s)", tableName, methodName);
             case DELETE:
-                return "DELETE FROM " + tableName + " WHERE ...";
+                return String.format("DELETE FROM %s WHERE ... (based on method: %s)", tableName, methodName);
             default:
-                return "/* Operation on " + tableName + " */";
+                return String.format("Custom operation on %s (based on method: %s)", tableName, methodName);
         }
     }
 
@@ -722,11 +727,18 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
         String entityName = snakeToCamel(firstTable, true);
 
         switch (op.getOperationType()) {
-            case SELECT: return "find" + entityName + "s";
-            case INSERT: return "save" + entityName;
-            case UPDATE: return "update" + entityName;
-            case DELETE: return "delete" + entityName;
-            default: return "access" + entityName;
+            case QUERY:
+            case FIND_BY_ID:
+            case FIND_ALL:
+                return "find" + entityName + "s";
+            case SAVE:
+                return "save" + entityName;
+            case UPDATE:
+                return "update" + entityName;
+            case DELETE:
+                return "delete" + entityName;
+            default:
+                return "access" + entityName;
         }
     }
     
@@ -776,9 +788,9 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
 
         if (classMetadata.getMethods() != null) {
             for (MethodMetadata method : classMetadata.getMethods()) {
-                DaoOperationDetail.SqlOperationType opType = inferOperationTypeFromMethodName(method.getName());
-                if (opType != DaoOperationDetail.SqlOperationType.UNKNOWN) {
-                    String syntheticQuery = createSyntheticQuery(opType, entityName, method.getName());
+                DaoOperationDetail.SqlOperationType sqlType = inferOperationTypeFromMethodName(method.getName());
+                if (sqlType != DaoOperationDetail.SqlOperationType.UNKNOWN) {
+                    String syntheticQuery = createSyntheticQuery(sqlType, entityName, method.getName());
                     List<String> tablesInvolved = new ArrayList<>();
                     tablesInvolved.add(entityName);
                     Pattern entityPattern = Pattern.compile("([A-Z][a-z]+)+");
@@ -790,7 +802,9 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
                         }
                     }
 
-                    operations.add(new DaoOperationDetail(method.getName(), syntheticQuery, opType, tablesInvolved.stream().distinct().collect(Collectors.toList())));
+                    // Convert SqlOperationType to DaoOperationType
+                    DaoOperationType daoType = convertSqlTypeToDaoType(sqlType);
+                    operations.add(new DaoOperationDetail(method.getName(), syntheticQuery, daoType, tablesInvolved.stream().distinct().collect(Collectors.toList())));
                 }
             }
         }
@@ -856,21 +870,6 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
         return null;
     }
 
-    private String createSyntheticQuery(DaoOperationDetail.SqlOperationType opType, String tableName, String methodName) {
-        switch (opType) {
-            case SELECT:
-                return String.format("SELECT * FROM %s (based on method: %s)", tableName, methodName);
-            case INSERT:
-                return String.format("INSERT INTO %s (...) VALUES (...) (based on method: %s)", tableName, methodName);
-            case UPDATE:
-                return String.format("UPDATE %s SET ... WHERE ... (based on method: %s)", tableName, methodName);
-            case DELETE:
-                return String.format("DELETE FROM %s WHERE ... (based on method: %s)", tableName, methodName);
-            default:
-                return String.format("Custom operation on %s (based on method: %s)", tableName, methodName);
-        }
-    }
-
     private String getTableNameFromEntity(ClassMetadata entityCm) {
         if (entityCm == null) {
             return null;
@@ -892,5 +891,35 @@ public class DaoAnalysisServiceImpl implements DaoAnalysisService {
         }
         logger.debug("No @Table(name=...) found for entity class {}, falling back to class name for table name derivation.", entityCm.getName());
         return camelToSnake(entityCm.getName());
+    }
+
+    private DaoOperationType convertSqlTypeToDaoType(DaoOperationDetail.SqlOperationType sqlType) {
+        if (sqlType == null) {
+            return DaoOperationType.UNKNOWN;
+        }
+        
+        switch (sqlType) {
+            case SELECT:
+                return DaoOperationType.QUERY;
+            case INSERT:
+                return DaoOperationType.SAVE;
+            case UPDATE:
+                return DaoOperationType.UPDATE;
+            case DELETE:
+                return DaoOperationType.DELETE;
+            case CREATE:
+                return DaoOperationType.CUSTOM;
+            case ALTER:
+                return DaoOperationType.CUSTOM;
+            case DROP:
+                return DaoOperationType.CUSTOM;
+            case TRUNCATE:
+                return DaoOperationType.CUSTOM;
+            case MERGE:
+                return DaoOperationType.UPDATE;
+            case UNKNOWN:
+            default:
+                return DaoOperationType.UNKNOWN;
+        }
     }
 } 
