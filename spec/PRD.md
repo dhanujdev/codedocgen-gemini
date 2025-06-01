@@ -12,7 +12,7 @@
 
 1.  Accept a **public Git repository URL** via UI.
 2.  Clone and scan the Java codebase. Project name is extracted from the URL.
-3.  Identify **all classes**, including controllers, services, entities, utility classes, configuration files, DAOs, WSDL definitions, YAML files.
+3.  Identify **all classes**, including controllers, services, entities, utility classes, configuration files, DAOs, WSDL definitions, YAML files. Handles single and multi-module Maven projects efficiently.
 4.  Generate:
     *   Complete **class diagrams**.
     *   Entity diagrams and ER diagrams for JPA entities.
@@ -33,8 +33,9 @@
 *   **Backend**: Java 21, Spring Boot (Maven)
 *   **Frontend**: React, Material UI (Primary), Axios
 *   **Parser Tools**: JavaParser (with symbol resolution), Reflection, Custom WSDL/XML parsers.
-    *   Maven execution during Java parsing now respects a configured `settings.xml` and applies `codedocgen`'s truststore settings (`truststore.jks` and password).
-*   **Diagram Generator**: PlantUML (rendered to SVG)
+    *   Maven execution during Java parsing now respects a configured `settings.xml`, utilizes an OS-aware Maven executable path, and applies `codedocgen`'s truststore settings (`truststore.jks` and password).
+    *   Optimized for memory usage and performance when analyzing large or multi-module projects.
+*   **Diagram Generator**: PlantUML (rendered to SVG), utilizing an OS-aware Graphviz `dot` executable path.
 *   **API Visualization**: Swagger UI + custom WSDL/XSD explorer.
 *   **Build Tool**: Maven
 
@@ -65,12 +66,12 @@
     *   **Database View (Entity-centric view of DAO interactions, detailed operations table)**
     *   Classes (Detailed class browser)
     *   Gherkin Features
-    *   **PCI/PII Scan (New): Displays findings of potential PCI/PII data across the repository, with details on file, line, and matched text. Patterns are configurable via `application.yml`.**
+    *   **PCI/PII Scan (New): Displays findings of potential PCI/PII data across the repository, with details on file, line, and matched text. Patterns are robustly configured via `application.yml` using a type-safe `@ConfigurationProperties` approach.**
 *   Export options (Future Enhancement)
 *   Publish to Confluence (Future Enhancement)
 *   **Logger Insights**:
     *   Provides a comprehensive overview of all logging statements in the codebase.
-    *   Identifies insecure or excessive logging, especially any exposure of **Personally Identifiable Information (PII)** and **Payment Card Industry (PCI)** data. Utilizes an extensive keyword pattern matching system, including common abbreviations and variations, to detect potential risks. **These keyword patterns are now configurable via the backend's `application.yml` file, allowing for easier customization and updates.**
+    *   Identifies insecure or excessive logging, especially any exposure of **Personally Identifiable Information (PII)** and **Payment Card Industry (PCI)** data. Utilizes an extensive keyword pattern matching system, including common abbreviations and variations, to detect potential risks. **These keyword patterns are now robustly configured via the backend's `application.yml` (using `@ConfigurationProperties`), allowing for easier customization and updates.**
     *   Helps security consultants audit logs easily.
     *   Displays logs in a table with class/filename, line number, log level, message, variables, and separate **PII Risk** and **PCI Risk** flags. Each log entry can be expanded to view associated variables.
     *   Includes "Expand All" and "Collapse All" buttons for log entry details.
@@ -92,7 +93,9 @@
 - Standalone SVG viewer (`svg-viewer.html`).
 - **WSDL/XSD Parsing**: Deep parsing for detailed WSDL/XSD display.
 - **Symbol Resolution Enhancement**: `mvn compile` pre-step for improved accuracy.
-    *   This step now also incorporates the project-specific `settings.xml` (if configured) and applies the `codedocgen` truststore for secure connections during dependency resolution or plugin execution.
+    *   This step now also incorporates the project-specific `settings.xml` (if configured), uses an OS-aware Maven executable, and applies the `codedocgen` truststore for secure connections during dependency resolution or plugin execution.
+    *   Enhanced to fully support multi-module Maven projects by parsing the root `pom.xml` and including all specified modules in the analysis scope.
+    *   Optimized classpath resolution using `mvn dependency:build-classpath -DincludeScope=compile`.
 - **Call Flow Display**: Dedicated page with sequence diagrams.
 - **Enhanced Component Diagram Generation**: Better SOAP/legacy support.
 - **Complete Usecase Diagram Redesign**: Multi-level use cases, SOAP support.
@@ -106,7 +109,7 @@
         *   **Presents an "Entities and Interacting Classes" view using `analysisResult.dbAnalysis.classesByEntity`.**
         *   **Shows a "Detailed Operations by DAO/Repository Class" table (with method names) using `analysisResult.dbAnalysis.operationsByClass`.**
         *   **Backend `DaoAnalysisServiceImpl` now returns `DbAnalysisResult` and filters redundant interfaces.**
-- **PCI/PII Scanning (New Feature)**: Added a comprehensive PCI/PII scanning capability that analyzes all text-based files in the repository (not just logs) for potential sensitive data exposure. Findings are presented in a dedicated UI tab. The detection patterns for PII and PCI data are configurable via the backend's `application.yml` file.
+- **PCI/PII Scanning (Enhanced)**: Comprehensive PCI/PII scanning analyzes all text-based files in the repository. Findings are presented in a dedicated UI tab. Detection patterns for PII/PCI data are robustly managed via a type-safe `@ConfigurationProperties` class (`PiiPciProperties`) populated from `application.yml`, ensuring clear and maintainable configuration.
 
 ## Known Limitations & TODOs (Summary)
 

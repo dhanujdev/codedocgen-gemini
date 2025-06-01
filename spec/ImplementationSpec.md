@@ -24,8 +24,9 @@ codedocgen-backend/
 │   ├── CodeDocGenApplication.java
 │   ├── config/
 │   │   └── WebConfig.java             // Handles CORS and static resource serving for generated diagrams/docs
+│   │   └── PiiPciProperties.java      // New: @ConfigurationProperties for PII/PCI patterns
 │   ├── controller/
-│   │   └── AnalysisController.java    // Orchestrates analysis, uses DbAnalysisResult from service
+│   │   └── AnalysisController.java    // Orchestrates analysis, uses DbAnalysisResult from service. Manages output directory cleanup.
 │   ├── dto/
 │   │   ├── RepoRequest.java
 │   │   ├── ParsedDataResponse.java  // Includes a field of type DbAnalysisResult
@@ -34,13 +35,13 @@ codedocgen-backend/
 │   │   ├── impl/                    // Service implementations here
 │   │   │   ├── GitServiceImpl.java
 │   │   │   ├── ProjectDetectorServiceImpl.java // Detects project type, Spring Boot version
-│   │   │   ├── JavaParserServiceImpl.java // Core parsing logic, symbol resolution, class/method metadata extraction. Uses JavaSymbolSolver.
+│   │   │   ├── JavaParserServiceImpl.java // Core parsing logic, symbol resolution, class/method metadata extraction. Uses JavaSymbolSolver. Handles multi-module Maven projects, resolves dependencies using `mvn dependency:build-classpath -DincludeScope=compile`, and correctly uses JarTypeSolver.
 │   │   │   ├── EndpointExtractorServiceImpl.java
 │   │   │   ├── DiagramServiceImpl.java      // Generates class, sequence, component, usecase, ERD, DB schema diagrams (SVG)
 │   │   │   ├── DocumentationServiceImpl.java // Generates project summaries, reads WSDL/XSD, Gherkin.
 │   │   │   ├── DaoAnalysisServiceImpl.java   // Implements DaoAnalysisService, returns DbAnalysisResult
-│   │   │   ├── LoggerInsightsServiceImpl.java // Analyzes logs for PII/PCI, patterns loaded from application.yml
-│   │   │   ├── PiiPciDetectionServiceImpl.java // New: Scans entire repo for PII/PCI based on configurable patterns
+│   │   │   ├── LoggerInsightsServiceImpl.java // Analyzes logs for PII/PCI, patterns loaded from application.yml (now indirectly via PiiPciProperties)
+│   │   │   ├── PiiPciDetectionServiceImpl.java // New: Scans entire repo for PII/PCI. Uses PiiPciProperties for pattern configuration.
 │   │   │   └── YamlParserServiceImpl.java   // New: Basic YAML file parsing service
 │   │   ├── GitService.java
 │   │   ├── ProjectDetectorService.java
@@ -59,7 +60,8 @@ codedocgen-backend/
 │   │   └── YamlParser.java            // (Existing)
 │   ├── util/
 │   │   ├── FileUtils.java
-│   │   └── PlantUMLRenderer.java      // Utility to render PlantUML source to SVG using Graphviz.
+│   │   ├── SystemInfoUtil.java        // OS detection and OS-aware executable path handling.
+│   │   └── PlantUMLRenderer.java      // Utility to render PlantUML source to SVG using Graphviz (OS-aware dot path).
 │   └── model/
 │       ├── ClassMetadata.java
 │       ├── MethodMetadata.java
@@ -70,7 +72,7 @@ codedocgen-backend/
 │       ├── PiiPciFinding.java       // New: Model for a single PII/PCI finding
 │       └── DbAnalysisResult.java      // New DTO: holds operationsByClass and classesByEntity maps
 ├── src/main/resources/
-│   └── application.yml              // Includes logging levels for specific classes (e.g., ClassMetadataVisitorLogger), PII/PCI patterns for LoggerInsights and PiiPciDetectionService
+│   └── application.yml              // Includes logging levels, PII/PCI patterns (structured maps for PiiPciProperties), Maven/Graphviz executable paths.
 ├── pom.xml
 └── README.md
 
@@ -150,7 +152,7 @@ codedocgen-frontend/
     *   **Backend Logic (`PiiPciDetectionServiceImpl.java`)**:
         *   Scans all text-based files in the cloned repository.
         *   Uses configurable regex patterns for PII (e.g., SSN, Email) and PCI (e.g., Credit Card numbers) data.
-        *   Patterns (map of type to regex string) are loaded from `application.yml` via `@Value` (e.g., `pii.patterns.EMAIL`, `pci.patterns.VISA`).
+        *   Patterns are loaded via injection of `PiiPciProperties` (a `@ConfigurationProperties` bean) which reads structured maps from `application.yml` (e.g., `app.pii.patterns.EMAIL`, `app.pci.patterns.VISA`).
         *   Excludes common binary file types and directories like `.git`, `target`, `build`, `node_modules`.
         *   Populates `PiiPciFinding` objects with details of each match.
     *   **Frontend Route**: `/pii-pci-scan` (Handled by `activeSection` in `App.js` via Sidebar)
@@ -178,11 +180,14 @@ codedocgen-frontend/
    * Username/password credentials support via `app.git.username` and `app.git.password` configuration properties.
    * Secure credential handling with masked logging.
 
-2. **Custom Maven Integration (`MavenBuildServiceImpl`):**
+2. **Custom Maven Integration (`MavenBuildServiceImpl`, `JavaParserServiceImpl`):**
    * Support for enterprise Maven `settings.xml` files via `app.maven.settings.path` configuration.
-   * Handles both filesystem paths and classpath resources.
+   * OS-aware Maven executable path handling via `app.maven.executable.path` or system PATH.
+   * Handles both filesystem paths and classpath resources for settings.
    * Support for temporary file management for classpath resources.
    * Properly masks sensitive information in logs.
+   * **Multi-module project support**: `JavaParserServiceImpl` parses the root `pom.xml` to find `<module>` entries and adds relevant source/resource directories of each module to the `CombinedTypeSolver`.
+   * **Optimized dependency resolution**: Uses `mvn dependency:build-classpath -DincludeScope=compile` for dependency JAR list for `JarTypeSolver`.
 
 3. **SSL/TLS Trust Configuration (`TruststoreConfig`):**
    * Robust loading of enterprise truststore.jks for HTTPS operations.
@@ -191,6 +196,11 @@ codedocgen-frontend/
    * Early initialization with Spring's `@Order(0)`.
    * Global system property configuration for all HTTPS operations.
    * Fallback to app-level trust store password if server one is not set.
+   * Enhanced OS detection with normalized return values (`macos`, `windows`, `linux`).
+   * Path resolution for executables (Maven, Graphviz `dot`) with proper OS-specific handling (e.g., `.cmd`, `.exe` suffixes) via `SystemInfoUtil.getExecutablePath()`.
+   * Support for Windows, macOS, and Linux.
+   * Helper methods for checking if executables are available on PATH.
+   * Used by `MavenBuildServiceImpl` for Maven path and `PlantUMLRenderer` for Graphviz `dot` path.
 
 4. **OS-Aware Path Management (`SystemInfoUtil`):**
    * Enhanced OS detection with normalized return values.
@@ -200,17 +210,21 @@ codedocgen-frontend/
 
 5. **Graphviz Integration (`PlantUMLRenderer`):**
    * Configurable dot executable path via `app.graphviz.dot.executable.path` property.
-   * Automatic fallback to common installation locations on Windows.
+   * OS-aware path resolution via `SystemInfoUtil.getExecutablePath()`.
+   * Automatic fallback to common installation locations on Windows if not configured and not on PATH.
    * Validation of the executable presence.
-   * System property configuration for PlantUML's Graphviz integration.
 
 **Core Parsing & Analysis Overhaul (Iterative):**
 
 1.  **Symbol Resolution Engine (Backend - `JavaParserServiceImpl`):**
-    *   Integrated JavaSymbolSolver with comprehensive type solvers.
+    *   Integrated JavaSymbolSolver with comprehensive type solvers (`CombinedTypeSolver`).
+        *   For multi-module Maven projects, parses root `pom.xml`, identifies modules, and adds `src/main/java`, `src/main/resources`, `target/classes` for each module to the solver.
+        *   `JarTypeSolver` is used for JAR dependencies, correctly instantiated with `jarFile.toPath()` and includes try-catch for robustness.
     *   Pre-compilation step (`mvn compile`) for generated sources.
         *   Maven commands now utilize a `settings.xml` file if specified in `codedocgen`'s configuration (`app.maven.settings.path`).
+        *   Maven execution uses an OS-aware executable path (`app.maven.executable.path` or default `mvn`/`mvn.cmd`).
         *   Maven execution environment is configured with truststore details (`truststore.jks` path and password) from `codedocgen`'s SSL configuration (`server.ssl.trust-store`, `app.ssl.trust-store-password`). This is managed by the enhanced `TruststoreConfig.java` class and applied by `MavenBuildServiceImpl`.
+        *   Uses `mvn dependency:build-classpath -DincludeScope=compile` for dependency JAR list for `JarTypeSolver`.
     *   FQN-centric identification.
     *   Robust fallbacks for unresolved calls.
     *   Accurate Class Type Determination.
@@ -243,11 +257,12 @@ codedocgen-frontend/
 
 5.  **Logger Insights (Backend `LoggerInsightsServiceImpl`, Frontend `LoggerInsightsPage`):**
     *   Analysis of log statements for PII/PCI risks.
-    *   Detection patterns configurable via `application.yml`.
+    *   Detection patterns configurable via `application.yml` (loaded via `PiiPciProperties`).
     *   Dedicated UI page with filtering and expandable details.
 
 6.  **Comprehensive PII/PCI Scanning (Backend `PiiPciDetectionServiceImpl`, Frontend `PiiPciScanPage`):**
-    *   Scans entire repository (text files) for PII/PCI data using configurable regex patterns from `application.yml`.
+    *   Scans entire repository (text files) for PII/PCI data.
+    *   Uses configurable regex patterns from `application.yml`, loaded robustly via `PiiPciProperties` (a `@ConfigurationProperties` class) injected into the service.
     *   Excludes binary files and irrelevant directories.
     *   Results displayed in a new dedicated UI tab (`PiiPciScanPage.js`) with search, filtering, and expandable details for each finding.
     *   New `PiiPciFinding.java` model and `PiiPciDetectionService.java` interface added.
@@ -263,8 +278,10 @@ codedocgen-frontend/
     *   `ProjectDetectorServiceImpl.java`: Add similar logic for `build.gradle`/`build.gradle.kts` if necessary for Spring Boot version detection (L120) - ✅ DONE (Regex corrected for Java string literals).
     *   `DocumentationServiceImpl.java`: (Method summaries) Add called methods / external calls if data is available (L108) - ✅ DONE; (Project summary) Enhance with common libraries, tech stack details (L279) - ✅ DONE (enhanced with available data, further improvements may require build file access).
     *   `DaoAnalyzer.java`: Handle cases where SQL is in a variable or constructed dynamically (L50) - ☑️ PARTIALLY ADDRESSED (basic variable tracking implemented; complex dynamic SQL remains a challenge).
-    *   **`LoggerInsightsServiceImpl.java`**: PII/PCI keyword patterns externalized to `application.yml` - ✅ DONE.
+    *   **`LoggerInsightsServiceImpl.java`**: PII/PCI keyword patterns externalized to `application.yml` - ✅ DONE (via `PiiPciProperties`).
     *   **Deeper YAML Parsing**: Added `YamlParserService` and `YamlParserServiceImpl` for basic YAML file parsing to `Map<String, Object>`. Further integration depends on specific use cases for YAML in target projects - ✅ NEWLY ADDED.
+    *   **Output Directory Management (`AnalysisController.java`)**: Deletes pre-existing `docs_*` directories in the output base path before creating a new unique output directory for the current analysis. - ✅ DONE.
+    *   **NullPointerException Fixes (`ClassMetadata.java`, `MethodMetadata.java`)**: Collections (Lists) are now initialized to prevent NPEs. - ✅ DONE.
 *   **Frontend:**
     *   `FlowExplorer.tsx`: Add more details or a way to expand/explore the flow (L24) - ✅ DONE (implemented basic expand/collapse for flow steps, though this file might be .js or integrated if not a separate .tsx now)
     *   `ApiSpecsPage.js`: (WSDL/XSD rendering) Future enhancement - if `typeAttr` refers to a global `complexType`, expand it (L247) - 📝 ACKNOWLEDGED & DETAILED (complex, for future iteration; detailed comment in code outlines steps).
@@ -295,13 +312,13 @@ codedocgen-frontend/
 
 *   **`GitService` / `GitServiceImpl`:** Clones and cleans Git repos.
 *   **`ProjectDetectorService` / `ProjectDetectorServiceImpl`:** Detects build tool, Spring Boot presence, and version (supports `pom.xml`, `build.gradle`, `build.gradle.kts`).
-*   **`JavaParserService` / `JavaParserServiceImpl`:** Core parsing engine using JavaParser and **JavaSymbolSolver**.
+*   **`JavaParserService` / `JavaParserServiceImpl`:** Core parsing engine using JavaParser and **JavaSymbolSolver**. Handles multi-module Maven projects, resolves dependencies robustly.
 *   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:** Extracts REST and SOAP (e.g. `@WebMethod`) endpoint info.
 *   **`DiagramService` / `DiagramServiceImpl`:** Generates Class, Component, Usecase, Sequence, ERD, and DB Schema diagrams as SVGs.
 *   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries (including called methods, external calls, and tech stack details from available data), finds feature/WSDL/XSD files.
 *   **`DaoAnalysisService` / `DaoAnalysisServiceImpl`:** // Implements DaoAnalysisService, returns DbAnalysisResult
-*   **`LoggerInsightsService` / `LoggerInsightsServiceImpl`:** // Analyzes logs for PII/PCI, patterns loaded from application.yml
-*   **`PiiPciDetectionService` / `PiiPciDetectionServiceImpl`:** // New: Scans entire repo for PII/PCI based on configurable patterns
+*   **`LoggerInsightsService` / `LoggerInsightsServiceImpl`:** // Analyzes logs for PII/PCI, patterns loaded via PiiPciProperties
+*   **`PiiPciDetectionService` / `PiiPciDetectionServiceImpl`:** // New: Scans entire repo for PII/PCI based on patterns from PiiPciProperties
 *   **`YamlParserService` / `YamlParserServiceImpl`:** // New: Basic YAML file parsing service
 
 ### 2.5. Parsers - `com.codedocgen.parser`

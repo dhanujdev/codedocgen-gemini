@@ -9,8 +9,9 @@ CodeDocGen is a full-stack application designed to analyze Java codebases, gener
 - **REST API Documentation**: Extract and document REST endpoints and generate OpenAPI specifications.
 - **SOAP/WSDL Documentation**: Parse and document SOAP web services.
 - **Database Analysis**: Analyze DAO/Repository classes to understand database operations.
-- **Security Analysis**: Detect PII/PCI data in source code and logs.
+- **Security Analysis**: Detect PII/PCI data in source code and logs using configurable patterns.
 - **Modern UI**: Clean, responsive interface built with React and Material UI.
+- **Multi-Module Maven Support**: Analyze complex, multi-module Maven projects.
 
 ## Enterprise-Ready Features
 
@@ -21,9 +22,11 @@ CodeDocGen has been enhanced with the following enterprise-specific features:
    - Configurable credentials via environment variables
 
 2. **Custom Maven Integration**:
-   - Support for enterprise Maven settings.xml files 
-   - Works with both filesystem and classpath resources
-   - Secure handling of sensitive information in logs
+   - Support for enterprise `settings.xml` files (via `MAVEN_SETTINGS_PATH`)
+   - Support for custom Maven executable paths (via `MAVEN_EXECUTABLE_PATH`)
+   - OS-aware handling of Maven executable (`mvn` vs. `mvn.cmd`)
+   - Enhanced support for multi-module Maven projects, automatically identifying and parsing all sub-modules.
+   - Optimized dependency resolution for faster analysis.
 
 3. **SSL/TLS Trust Configuration**:
    - Robust handling of enterprise truststore.jks for HTTPS operations
@@ -33,12 +36,16 @@ CodeDocGen has been enhanced with the following enterprise-specific features:
 4. **OS-Aware Path Management**:
    - Enhanced path handling for executables across different operating systems
    - Support for Windows, macOS, and Linux
-   - Automatic detection and validation of required executables
+   - Automatic detection and validation of required executables (Maven, Git, Graphviz dot)
 
 5. **Configurable Diagram Generation**:
-   - OS-aware executable path handling for Graphviz dot
+   - OS-aware executable path handling for Graphviz dot (via `GRAPHVIZ_DOT_PATH`)
    - Configurable path via application properties
    - Automatic fallback for Windows installations
+
+6. **Robust PII/PCI Detection**:
+   - Flexible PII/PCI pattern definition via `application.yml` using a type-safe configuration properties class (`PiiPciProperties.java`).
+   - Clear logging of loaded patterns during application startup.
 
 ## Project Structure
 
@@ -67,13 +74,26 @@ app:
     settings:
       path: ${MAVEN_SETTINGS_PATH:} # e.g., /path/to/enterprise/settings.xml or classpath:enterprise-settings.xml
     executable:
-      path: ${MAVEN_EXECUTABLE_PATH:mvn} # Defaults to 'mvn' assuming it's on PATH
+      path: ${MAVEN_EXECUTABLE_PATH:mvn} # Defaults to 'mvn' (or 'mvn.cmd' on Windows) assuming it's on PATH
   graphviz:
     dot:
       executable:
-        path: ${GRAPHVIZ_DOT_PATH:dot} # Defaults to 'dot' assuming it's on PATH
+        path: ${GRAPHVIZ_DOT_PATH:dot} # Defaults to 'dot' (or 'dot.exe' on Windows) assuming it's on PATH
   ssl:
     trust-store-password: ${SSL_TRUST_STORE_PASSWORD:changeit} # Default truststore password
+  # PII and PCI patterns are configured directly in application.yml under app.pii.patterns and app.pci.patterns
+  # Example:
+  # pii:
+  #   patterns:
+  #     ALL_PII: "\b(ssn|socialsecurity|...)\b"
+  # pci:
+  #   patterns:
+  #     ALL_PCI: "\b(creditcard|cardnum|...)\b"
+
+# For PII/PCI pattern examples, refer to the PiiPciProperties.java class or the default application.yml.
+# The keys under app.pii.patterns and app.pci.patterns (e.g., ALL_PII) are arbitrary identifiers
+# used in PiiPciDetectionServiceImpl. The values are the regex patterns.
+
 ```
 
 Additionally, you can configure the server's SSL trust store:

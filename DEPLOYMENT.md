@@ -95,9 +95,10 @@ The Dockerfile sets the following default environment variables for the runtime 
 
 *   `PORT=8080`: The port the Spring Boot application will listen on inside the container.
 *   `SPRING_PROFILES_ACTIVE=production`: Sets the active Spring profile to `production`.
-*   `GRAPHVIZ_DOT=/usr/bin/dot`: Specifies the path to the Graphviz `dot` executable for PlantUML.
+*   `GRAPHVIZ_DOT_PATH=/usr/bin/dot`: Specifies the path to the Graphviz `dot` executable for PlantUML. (The application is OS-aware, so this specific path is for the Linux container; it will adapt if run on other OSes outside Docker, using `dot` or `dot.exe` as appropriate from the system PATH or a configured path).
+*   `MAVEN_EXECUTABLE_PATH=mvn`: Specifies the default Maven command. (The application is OS-aware and will use `mvn` or `mvn.cmd` as appropriate if this is not overridden for a specific path).
 
-You can override these (except `GRAPHVIZ_DOT` which is tied to the installation path) or add other Spring Boot properties when running the `docker run` command using the `-e` or `--env` flag. For example, to change the port and add a custom Spring Boot property:
+You can override these (except `GRAPHVIZ_DOT_PATH` and `MAVEN_EXECUTABLE_PATH` which are tied to the container's/system's installation path unless you provide an absolute path to a different executable) or add other Spring Boot properties when running the `docker run` command using the `-e` or `--env` flag. For example, to change the port and add a custom Spring Boot property:
 
 ```bash
 docker run -d -p 8081:8081 --name codedocgen-instance \
@@ -116,8 +117,8 @@ docker run -d -p 8080:8080 --name codedocgen-instance \
   -e GIT_USERNAME='your-git-username' \
   -e GIT_PASSWORD='your-git-password' \
   -e MAVEN_SETTINGS_PATH='/path/to/settings.xml' \
-  -e MAVEN_EXECUTABLE_PATH='/path/to/mvn' \
-  -e GRAPHVIZ_DOT_PATH='/path/to/dot' \
+  -e MAVEN_EXECUTABLE_PATH='/path/to/specific/mvn/executable' \
+  -e GRAPHVIZ_DOT_PATH='/path/to/specific/dot/executable' \
   -e SSL_TRUST_STORE_PASSWORD='your-truststore-password' \
   -v /path/to/host/truststore.jks:/app/truststore.jks \
   -v /path/to/host/settings.xml:/app/settings.xml \
@@ -130,6 +131,12 @@ You would also need to update the Spring Boot configuration to use these mounted
 -e SPRING_APPLICATION_JSON='{"server.ssl.trust-store":"/app/truststore.jks","app.maven.settings.path":"/app/settings.xml"}'
 ```
 
+If you need to customize PII/PCI detection patterns, these are configured in `application.yml` under `app.pii.patterns` and `app.pci.patterns`. For Docker deployments, you can override these by: 
+1. Mounting a custom `application-production.yml` file into `/app/resources/` (if your Dockerfile copies resources there) or `/app/config/` (if Spring Boot is configured to look there).
+2. Or, more directly, by using `SPRING_APPLICATION_JSON` to set these properties, e.g.:
+   `-e SPRING_APPLICATION_JSON='{"app.pii.patterns.ALL_PII":"your_custom_regex", "app.pci.patterns.ALL_PCI":"another_regex"}'`
+   Refer to `PiiPciProperties.java` and `PiiPciDetectionServiceImpl.java` for how these are structured and used.
+
 ### Application Properties
 
 Spring Boot properties can be configured through `application-production.yml` (or `.properties`) if you include such a file in `codedocgen-backend/src/main/resources/` before building the Docker image. The `SPRING_PROFILES_ACTIVE=production` environment variable will ensure this profile-specific configuration is loaded.
@@ -138,6 +145,11 @@ Key properties you might want to manage:
 
 *   `app.repoStoragePath`: Path where cloned repositories are temporarily stored during analysis.
 *   `app.outputBasePath`: Path where generated diagrams and documents are stored if they need to be persisted or accessed outside the application flow (though in the current Docker setup, these are mostly transient within the container unless volumes are used).
+
+1. **Prepare a custom settings.xml** with your enterprise repository configuration, including any necessary mirror or proxy settings.
+2. **Mount the settings.xml** into the container.
+3. **Configure the application** to use it via `app.maven.settings.path` (or the `MAVEN_SETTINGS_PATH` environment variable).
+4. The application now has enhanced support for multi-module Maven projects, automatically discovering and parsing modules listed in the root `pom.xml`.
 
 ## 6. Persistent Storage (Optional)
 
@@ -183,9 +195,10 @@ For private repository access:
 
 For enterprise Maven repositories:
 
-1. **Prepare a custom settings.xml** with your enterprise repository configuration.
+1. **Prepare a custom settings.xml** with your enterprise repository configuration, including any necessary mirror or proxy settings.
 2. **Mount the settings.xml** into the container.
-3. **Configure the application** to use it via `app.maven.settings.path`.
+3. **Configure the application** to use it via `app.maven.settings.path` (or the `MAVEN_SETTINGS_PATH` environment variable).
+4. The application now has enhanced support for multi-module Maven projects, automatically discovering and parsing modules listed in the root `pom.xml`.
 
 ## 8. Troubleshooting
 
@@ -196,13 +209,14 @@ For enterprise Maven repositories:
     *   Use `docker logs codedocgen-instance` to check for application startup errors (e.g., Java exceptions, Spring Boot configuration issues).
     *   Ensure that the port you are trying to map (e.g., `8080`) is not already in use on your host machine.
 *   **Diagram Generation Issues:**
-    *   If diagrams are not generating correctly at runtime, it might be related to the Graphviz installation or `GRAPHVIZ_DOT` path. The current `Dockerfile` attempts to handle this by installing Graphviz in the final image.
+    *   If diagrams are not generating correctly at runtime, it might be related to the Graphviz installation or `GRAPHVIZ_DOT_PATH`. The current `Dockerfile` installs Graphviz. For non-Docker or enterprise deployments, ensure `app.graphviz.dot.executable.path` (or `GRAPHVIZ_DOT_PATH` env var) points to the correct `dot` executable for your OS.
     *   For enterprise deployments, ensure the configured `app.graphviz.dot.executable.path` is correct for your environment.
 *   **SSL/Trust Issues:**
     *   If you encounter SSL validation errors when connecting to enterprise repositories, check that your truststore is correctly configured and mounted.
     *   Verify the system properties are correctly set via environment variables.
 *   **Maven Repository Access:**
     *   If you experience issues accessing enterprise Maven repositories, verify your `settings.xml` configuration and ensure network connectivity to the repository.
+    *   Check logs for messages related to Maven build processes, specifically classpath generation or dependency resolution. The tool now uses `mvn dependency:build-classpath -DincludeScope=compile` for more robust classpath discovery.
 
 ## 9. Updating the Application
 

@@ -47,6 +47,14 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.regex.Pattern;
 
+// Imports for XML parsing
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.xml.sax.InputSource; // Added for parsing without DTD validation for security
+
 @Service
 public class JavaParserServiceImpl implements JavaParserService {
 
@@ -81,6 +89,7 @@ public class JavaParserServiceImpl implements JavaParserService {
             boolean isMavenProject = pomFile.exists() && !isGradleProject; // Prefer Gradle if both somehow exist
 
             CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();
+            List<File> moduleBaseDirs = new ArrayList<>(); // For multi-module projects
 
             if (isGradleProject) {
                 logger.info("Detected Gradle project in {}. Running Gradle commands.", projectDir.getAbsolutePath());
@@ -201,6 +210,10 @@ public class JavaParserServiceImpl implements JavaParserService {
                     }
                 }
 
+                // After Maven commands, try to find modules if it's a Maven project
+                if (pomFile.exists()) {
+                    moduleBaseDirs.addAll(getMavenModules(pomFile, projectDir));
+                }
             } else if (isMavenProject) {
                 logger.info("Detected Maven project in {}. Running Maven commands.", projectDir.getAbsolutePath());
                 try {
@@ -211,6 +224,7 @@ public class JavaParserServiceImpl implements JavaParserService {
                         "dependency:build-classpath", 
                         "-Dmdep.outputFile=" + CLASSPATH_OUTPUT_FILE,
                         "-Dmdep.pathSeparator=" + File.pathSeparator,
+                        "-DincludeScope=compile",
                         "-q"
                     );
                     logger.info("Maven 'dependency:build-classpath' finished with exit code: {}. Output: {}", classpathResult.getExitCode(), classpathResult.getOutput());
@@ -234,8 +248,18 @@ public class JavaParserServiceImpl implements JavaParserService {
                         Thread.currentThread().interrupt();
                     }
                 }
+
+                // After Maven commands, try to find modules if it's a Maven project
+                if (pomFile.exists()) {
+                    moduleBaseDirs.addAll(getMavenModules(pomFile, projectDir));
+                }
             } else {
                 logger.warn("No pom.xml or build.gradle/build.gradle.kts file found in {}. Skipping build system pre-compile and classpath build steps. Resolution will be limited.", projectDir.getAbsolutePath());
+            }
+            
+            // Always add the root project directory itself as a base for sources
+            if (!moduleBaseDirs.contains(projectDir)) {
+                moduleBaseDirs.add(0, projectDir); // Add root project first
             }
 
             // Add ReflectionTypeSolver for JDK classes - prefer classloader
@@ -255,44 +279,68 @@ public class JavaParserServiceImpl implements JavaParserService {
             }
 
             // Add project's own source roots first
-            File srcMainJava = new File(projectDir, "src/main/java");
-            if (srcMainJava.exists() && srcMainJava.isDirectory()) {
-                logger.info("Adding JavaParserTypeSolver for main source root: {}", srcMainJava.getAbsolutePath());
-                combinedTypeSolver.add(new JavaParserTypeSolver(srcMainJava));
-            } else {
-                logger.warn("Main source directory {} does not exist.", srcMainJava.getAbsolutePath());
-            }
+            // File srcMainJava = new File(projectDir, "src/main/java"); // Old way
+            // if (srcMainJava.exists() && srcMainJava.isDirectory()) {
+            //     logger.info("Adding JavaParserTypeSolver for source root: {}", srcMainJava.getAbsolutePath());
+            //     combinedTypeSolver.add(new JavaParserTypeSolver(srcMainJava));
+            // }
 
-            File srcTestJava = new File(projectDir, "src/test/java");
-            if (srcTestJava.exists() && srcTestJava.isDirectory()) {
-                logger.info("Adding JavaParserTypeSolver for test source root: {}", srcTestJava.getAbsolutePath());
-                combinedTypeSolver.add(new JavaParserTypeSolver(srcTestJava));
-            } else {
-                logger.warn("Test source directory {} does not exist.", srcTestJava.getAbsolutePath());
-            }
+            // File srcTestJava = new File(projectDir, "src/test/java"); // Old way
+            // if (srcTestJava.exists() && srcTestJava.isDirectory()) {
+            //     logger.info("Adding JavaParserTypeSolver for test source root: {}", srcTestJava.getAbsolutePath());
+            //     combinedTypeSolver.add(new JavaParserTypeSolver(srcTestJava));
+            // }
             
-            // Add common generated source directories
-            String[] generatedSourceDirs = {
-                // Maven specific
-                "target/generated-sources/annotations",
-                "target/generated-sources/apt",
-                "target/generated-sources/jaxb",
-                // Gradle specific
-                "build/generated/sources/annotationProcessor/java/main", // Gradle default for annotation processors
-                "build/generated-sources/jaxb",                          // Common for JAXB with Gradle
-                "build/generated/sources/jaxb/main/java",                // JAXB with main sourceSet (Gradle)
-                "build/generated/jaxb",                                  // Another Gradle JAXB variant
-                "build/generated-java",                                  // General Gradle generated Java
-                "build/generated/sources/wsimport/main/java",            // wsimport with main sourceSet (Gradle)
-                "build/generated-sources/wsimport"                       // wsimport general (Gradle)
+            // Common source directory patterns to look for in each module
+            String[] commonSrcDirs = {"src/main/java", "src/test/java"};
+            String[] commonResourceDirs = {"src/main/resources", "src/test/resources"}; // Though not directly parsed, good for context
+            String[] commonGeneratedAnnotationsDirs = {"target/generated-sources/annotations", "build/generated/sources/annotationProcessor/java/main"}; // Maven, Gradle
+            String[] commonGeneratedSourcesDirs = {
+                "target/generated-sources", // Maven general
+                "build/generated-sources",  // Gradle general
+                "build/generated/sources/jaxb/main/java", // Gradle JAXB example
+                "build/generated/sources/xjc/main/java", // Common for XJC plugin
+                "target/generated-sources/jaxb", // Maven JAXB
+                "target/generated-sources/xjc", // Maven XJC
+                "target/generated-sources/wsimport", // Maven wsimport
+                // Add more known generated source locations as needed
             };
-            for (String genDir : generatedSourceDirs) {
-                File generatedSrcDir = new File(projectDir, genDir);
-                if (generatedSrcDir.exists() && generatedSrcDir.isDirectory()) {
-                    logger.info("Adding JavaParserTypeSolver for generated source root: {}", generatedSrcDir.getAbsolutePath());
-                    combinedTypeSolver.add(new JavaParserTypeSolver(generatedSrcDir));
+
+
+            for (File baseDir : moduleBaseDirs) {
+                logger.info("Processing module/project directory for TypeSolvers: {}", baseDir.getAbsolutePath());
+                for (String srcPath : commonSrcDirs) {
+                    File srcDir = new File(baseDir, srcPath);
+                    if (srcDir.exists() && srcDir.isDirectory()) {
+                        logger.info("Adding JavaParserTypeSolver for source root: {}", srcDir.getAbsolutePath());
+                        combinedTypeSolver.add(new JavaParserTypeSolver(srcDir));
+                    }
+                }
+                for (String genPath : commonGeneratedAnnotationsDirs) {
+                    File genDir = new File(baseDir, genPath);
+                    if (genDir.exists() && genDir.isDirectory()) {
+                        logger.info("Adding JavaParserTypeSolver for generated annotations root: {}", genDir.getAbsolutePath());
+                        combinedTypeSolver.add(new JavaParserTypeSolver(genDir));
+                    }
+                }
+                for (String genPath : commonGeneratedSourcesDirs) {
+                    File genDir = new File(baseDir, genPath);
+                     if (genDir.exists() && genDir.isDirectory()) {
+                        // Check if it's a directory with .java files before adding
+                        try (Stream<Path> walk = Files.walk(genDir.toPath(), 3)) { // Limit depth to avoid large scans
+                            if (walk.anyMatch(p -> p.toString().endsWith(".java"))) {
+                                logger.info("Adding JavaParserTypeSolver for general generated source root: {}", genDir.getAbsolutePath());
+                                combinedTypeSolver.add(new JavaParserTypeSolver(genDir));
+                            } else {
+                                logger.debug("Skipping generated source directory {} as it contains no .java files (within depth 3).", genDir.getAbsolutePath());
+                            }
+                        } catch (IOException e) {
+                            logger.warn("Could not walk directory {}: {}", genDir.getAbsolutePath(), e.getMessage());
+                        }
+                    }
                 }
             }
+
 
             // Add compiled output directories of the project being analyzed
             // These are important for resolving symbols from compiled code, especially after annotation processing (Lombok)
@@ -302,53 +350,45 @@ public class JavaParserServiceImpl implements JavaParserService {
                     "build/classes/kotlin/main",    // Gradle default for Kotlin
                     "build/classes/groovy/main",    // Gradle default for Groovy
                     "build/classes/scala/main",     // Gradle default for Scala
-                    "build/resources/main"          // Gradle resources
-                    // Add more specific Gradle output dirs if needed (e.g., for subprojects, though this is coarse)
+                    "build/resources/main"          // Gradle resources (might contain .class files in some cases or provide context)
                 };
-                for (String classesDir : buildClassesDirs) {
-                    File dir = new File(projectDir, classesDir);
-                    if (dir.exists() && dir.isDirectory()) {
-                        logger.info("Adding JavaParserTypeSolver for Gradle build output directory: {}", dir.getAbsolutePath());
-                        combinedTypeSolver.add(new JavaParserTypeSolver(dir));
+                for (File baseDir : moduleBaseDirs) { // Iterate modules for Gradle too
+                    for (String classesPath : buildClassesDirs) {
+                        File dir = new File(baseDir, classesPath);
+                        if (dir.exists() && dir.isDirectory()) {
+                            logger.info("Adding JarTypeSolver for Gradle build output directory: {}", dir.getAbsolutePath());
+                             try {
+                                combinedTypeSolver.add(new JarTypeSolver(dir.toPath()));
+                            } catch (Exception e) {
+                                logger.warn("Failed to add JarTypeSolver for Gradle build output {}: {} - {}. This directory will be skipped.", dir.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+                            }
+                        }
                     }
                 }
-                 // Add JARs found in build/libs as JarTypeSolvers (Gradle projects)
-                // This is already handled above now more explicitly. Keeping this section for target/classes for Maven.
             }
             
             // Maven specific or general fallback if dirs exist
-            File targetClasses = new File(projectDir, "target/classes");
-            if (targetClasses.exists() && targetClasses.isDirectory()) {
-                // logger.info("Adding JavaParserTypeSolver for project's compiled classes (target/classes): {}", targetClasses.getAbsolutePath()); // Incorrect: JavaParserTypeSolver is for .java files
-                // combinedTypeSolver.add(new JavaParserTypeSolver(targetClasses));
-                logger.info("Maven compiled classes directory {} exists. Adding as JarTypeSolver.", targetClasses.getAbsolutePath());
-                try {
-                    combinedTypeSolver.add(new JarTypeSolver(targetClasses));
-                } catch (Exception e) {
-                    logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This directory will be skipped.", targetClasses.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+            String[] targetClassesDirs = {"target/classes", "target/test-classes"};
+            for (File baseDir : moduleBaseDirs) { // Iterate modules
+                for (String classesPath : targetClassesDirs) {
+                    File dir = new File(baseDir, classesPath);
+                    if (dir.exists() && dir.isDirectory()) {
+                        logger.info("Adding JarTypeSolver for project's compiled classes directory: {}", dir.getAbsolutePath());
+                        try {
+                            combinedTypeSolver.add(new JarTypeSolver(dir.toPath()));
+                        } catch (Exception e) {
+                            logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This directory will be skipped.", dir.getAbsolutePath(), e.getClass().getName(), e.getMessage());
+                        }
+                    } else if (isMavenProject && classesPath.equals("target/classes")) { // Only warn if it's a Maven project and main classes are missing
+                        logger.warn("Maven project compiled classes directory {} does not exist in module {}.", classesPath, baseDir.getName());
+                    }
                 }
-            } else if (isMavenProject) { // Only warn if it's a Maven project and it's missing
-                logger.warn("Maven project compiled classes directory {} does not exist.", targetClasses.getAbsolutePath());
-            }
-
-            File targetTestClasses = new File(projectDir, "target/test-classes");
-            if (targetTestClasses.exists() && targetTestClasses.isDirectory()) {
-                // logger.info("Adding JavaParserTypeSolver for project's compiled test classes (target/test-classes): {}", targetTestClasses.getAbsolutePath()); // Incorrect: JavaParserTypeSolver is for .java files
-                // combinedTypeSolver.add(new JavaParserTypeSolver(targetTestClasses));
-                 logger.info("Maven compiled test classes directory {} exists. Adding as JarTypeSolver.", targetTestClasses.getAbsolutePath());
-                 try {
-                    combinedTypeSolver.add(new JarTypeSolver(targetTestClasses));
-                } catch (Exception e) {
-                    logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This directory will be skipped.", targetTestClasses.getAbsolutePath(), e.getClass().getName(), e.getMessage());
-                }
-            } else if (isMavenProject) { // Only warn if it's a Maven project and it's missing
-                logger.warn("Maven project compiled test classes directory {} does not exist.", targetTestClasses.getAbsolutePath());
             }
 
             // Add JarTypeSolvers for Maven project dependencies (using the pre-built classpath file)
-            // This part is Maven-specific because it relies on CLASSPATH_OUTPUT_FILE
+            // This part is Maven-specific because it relies on CLASSPATH_OUTPUT_FILE from the root project
             if (isMavenProject) {
-                File classpathFile = new File(projectDir, CLASSPATH_OUTPUT_FILE);
+                File classpathFile = new File(projectDir, CLASSPATH_OUTPUT_FILE); // Classpath file is generated at root
                 if (classpathFile.exists() && classpathFile.isFile()) {
                     try {
                         String classpath = new String(Files.readAllBytes(classpathFile.toPath()), StandardCharsets.UTF_8).trim();
@@ -363,7 +403,7 @@ public class JavaParserServiceImpl implements JavaParserService {
                                     if (jarFile.exists() && jarFile.isFile()) {
                                         try {
                                             logger.info("Adding JarTypeSolver for dependency: {}", jarFile.getAbsolutePath());
-                                            combinedTypeSolver.add(new JarTypeSolver(jarFile));
+                                            combinedTypeSolver.add(new JarTypeSolver(jarFile.toPath()));
                                         } catch (Exception e) {
                                             logger.warn("Failed to add JarTypeSolver for {}: {} - {}. This JAR will be skipped.", jarFile.getAbsolutePath(), e.getClass().getName(), e.getMessage());
                                         }
@@ -388,17 +428,14 @@ public class JavaParserServiceImpl implements JavaParserService {
             }
             
             // Fallback if no standard source roots found (AFTER attempting specific ones)
-            boolean primarySourceFound = (srcMainJava.exists() && srcMainJava.isDirectory()) ||
-                                       (srcTestJava.exists() && srcTestJava.isDirectory()) ||
-                                       (targetClasses.exists() && targetClasses.isDirectory());
-            boolean generatedSrcFound = false;
-            for (String genDir : generatedSourceDirs) {
+            boolean primarySourceFound = false;
+            for (String genDir : commonGeneratedSourcesDirs) {
                 if (new File(projectDir, genDir).exists()) {
-                    generatedSrcFound = true;
+                    primarySourceFound = true;
                     break;
                 }
             }
-            if (!primarySourceFound && !generatedSrcFound) {
+            if (!primarySourceFound) {
                  logger.warn("No standard, generated, or target/classes source roots found. Adding project root as a last resort JavaParserTypeSolver: {}", projectDir.getAbsolutePath());
                  combinedTypeSolver.add(new JavaParserTypeSolver(projectDir)); // Least preferred, broad scope
             }
@@ -408,6 +445,57 @@ public class JavaParserServiceImpl implements JavaParserService {
             StaticJavaParser.setConfiguration(config);
             logger.info("JavaParser Symbol Solver initialized and configuration set for project: {}", projectDir.getAbsolutePath());
         }
+    }
+
+    /**
+     * Parses a pom.xml file to find declared modules.
+     * @param pomFile The pom.xml file.
+     * @param projectRoot The root directory of the main project.
+     * @return A list of File objects representing the base directories of the modules.
+     */
+    private List<File> getMavenModules(File pomFile, File projectRoot) {
+        List<File> moduleDirs = new ArrayList<>();
+        if (!pomFile.exists()) {
+            logger.warn("getMavenModules: pom.xml not found at {}", pomFile.getAbsolutePath());
+            return moduleDirs;
+        }
+
+        try {
+            DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+            // Disable DTD validation and external entities for security
+            dbFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            dbFactory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            dbFactory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            dbFactory.setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "");
+            dbFactory.setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "");
+            dbFactory.setExpandEntityReferences(false);
+            
+            DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
+            
+            // Use InputSource to parse to avoid issues with DTDs in some poms
+            Document doc = dBuilder.parse(new InputSource(new FileInputStream(pomFile)));
+            doc.getDocumentElement().normalize();
+
+            org.w3c.dom.NodeList moduleNodes = doc.getElementsByTagName("module");
+            for (int i = 0; i < moduleNodes.getLength(); i++) {
+                Node node = moduleNodes.item(i);
+                if (node.getNodeType() == Node.ELEMENT_NODE) {
+                    String moduleName = node.getTextContent().trim();
+                    if (!moduleName.isEmpty()) {
+                        File moduleDir = new File(projectRoot, moduleName);
+                        if (moduleDir.exists() && moduleDir.isDirectory()) {
+                            logger.info("Discovered Maven module: {}", moduleDir.getAbsolutePath());
+                            moduleDirs.add(moduleDir);
+                        } else {
+                            logger.warn("Declared Maven module directory does not exist: {}", moduleDir.getAbsolutePath());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error parsing pom.xml ({}) for modules: {}", pomFile.getAbsolutePath(), e.getMessage(), e);
+        }
+        return moduleDirs;
     }
 
     @Override

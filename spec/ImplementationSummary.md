@@ -18,10 +18,11 @@ This document summarizes the current state of the CodeDocGen project, covering b
 
 ### 2.1. Main Application & Configuration
 
-*   **`CodeDocGenApplication.java`:** Main Spring Boot application class.
+*   **`CodeDocGenApplication.java`:** Main Spring Boot application class. Includes `@EnableConfigurationProperties(PiiPciProperties.class)`.
 *   **`pom.xml`:** Manages dependencies, including `com.github.javaparser:javaparser-symbol-solver`.
-*   **`application.yml`:** Configures server port, application name, logging levels, and configurable paths.
+*   **`application.yml`:** Configures server port, application name, logging levels, and configurable paths for Maven/Graphviz. Defines PII/PCI patterns as structured maps for `PiiPciProperties`.
 *   **`config/WebConfig.java`:** Configures CORS and static resource serving for `/generated-output/**`.
+*   **`config/PiiPciProperties.java`:** New `@ConfigurationProperties(prefix = "app")` class to load PII/PCI patterns maps (`app.pii.patterns`, `app.pci.patterns`).
 
 ### 2.2. DTOs (Data Transfer Objects) - `com.codedocgen.dto`
 
@@ -50,7 +51,7 @@ This document summarizes the current state of the CodeDocGen project, covering b
 ### 2.3. Models - `com.codedocgen.model`
 
 *   **`ClassMetadata.java`:** Name, packageName, type, annotations, methods, fields, parentClass, interfaces, filePath, etc.
-*   **`MethodMetadata.java`:** Name, returnType, parameters, annotations, exceptions, visibility, static, abstract, `calledMethods`, `parameterAnnotations`, `daoOperations`, `sqlQueries`, `sqlTables`, `sqlOperations`.
+*   **`MethodMetadata.java`:** Name, returnType, parameters, annotations, exceptions, visibility, static, abstract, `calledMethods`, `parameterAnnotations`, `daoOperations`, `sqlQueries`, `sqlTables`, `sqlOperations`. Collections are initialized.
 *   **`FieldMetadata.java`:** Name, type, annotations, visibility, static, final, `initializer`.
 *   **`EndpointMetadata.java`:** Path, httpMethod, handlerMethod, requestBodyType, responseBodyType, etc.
 *   **`DiagramType.java` (enum):** `CLASS_DIAGRAM`, `SEQUENCE_DIAGRAM`, `COMPONENT_DIAGRAM`, `USECASE_DIAGRAM`, `DATABASE_DIAGRAM`, `ENTITY_RELATIONSHIP_DIAGRAM`.
@@ -65,8 +66,12 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **`GitService` / `GitServiceImpl`:** Clones and cleans Git repos.
 *   **`ProjectDetectorService` / `ProjectDetectorServiceImpl`:** Detects build tool, Spring Boot presence, and version (supports `pom.xml`, `build.gradle`, `build.gradle.kts`).
 *   **`JavaParserService` / `JavaParserServiceImpl`:** Core parsing engine using JavaParser and **JavaSymbolSolver**.
-    *   Maven commands executed during parsing now utilize a `settings.xml` file if specified via `codedocgen.maven.settings.xml.path`.
-    *   The Maven execution environment is also configured with truststore details (`truststore.jks` and password) from `codedocgen`'s SSL properties (`server.ssl.trust-store`, `server.ssl.trust-store-password`), managed by `TruststoreConfig.java` and applied via `MavenBuildServiceImpl`.
+    *   Handles multi-module Maven projects by parsing the root `pom.xml` for `<module>` entries and adding relevant source/resource directories (e.g., `src/main/java`, `src/main/resources`, `target/classes`) of each module to the `CombinedTypeSolver`.
+    *   Uses `mvn dependency:build-classpath -DincludeScope=compile` for robust classpath discovery for JavaSymbolSolver.
+    *   Correctly instantiates `JarTypeSolver` using `jarFile.toPath()` with error handling.
+    *   Maven commands executed during parsing now utilize a `settings.xml` file if specified via `app.maven.settings.path` (or `MAVEN_SETTINGS_PATH` env var).
+    *   Maven execution uses an OS-aware executable path (`app.maven.executable.path` or default `mvn`/`mvn.cmd`) resolved by `SystemInfoUtil`.
+    *   The Maven execution environment is also configured with truststore details (`truststore.jks` and password) from `codedocgen`'s SSL properties (`server.ssl.trust-store`, `app.ssl.trust-store-password`), managed by `TruststoreConfig.java` and applied via `MavenBuildServiceImpl`.
 *   **`EndpointExtractorService` / `EndpointExtractorServiceImpl`:** Extracts REST and SOAP (e.g. `@WebMethod`) endpoint info.
 *   **`DiagramService` / `DiagramServiceImpl`:** Generates Class, Component, Usecase, Sequence, ERD, and DB Schema diagrams as SVGs.
 *   **`DocumentationService` / `DocumentationServiceImpl`:** Generates project summaries (including called methods, external calls, and tech stack details from available data), finds feature/WSDL/XSD files.
@@ -82,10 +87,10 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Detects potential PII and PCI data exposure using comprehensive, configurable keyword patterns (including common abbreviations and variations like `ssn`, `cardnbr`, `cvv`, `firstnm`, `addr`, `mmn`, etc.) applied to log messages and variable names/types.
     *   Distinguishes between PII-specific risks, PCI-specific risks, and general sensitive data risks (which flag both PII and PCI).
     *   Populates `LogStatement` and `LogVariable` objects with findings.
-    *   **PII/PCI keyword regex patterns are now loaded from `application.yml`, allowing for configuration without recompiling.**
+    *   **PII/PCI keyword regex patterns are now loaded from `application.yml` via the `PiiPciProperties` bean, allowing for configuration without recompiling.**
     *   **`PiiPciDetectionService` / `PiiPciDetectionServiceImpl`:** New service.
         *   Scans the entire repository (text-based files) for potential PII and PCI data.
-        *   Uses configurable regex patterns loaded from `application.yml` (e.g., `pii.patterns.EMAIL`, `pci.patterns.VISA`).
+        *   Uses configurable regex patterns loaded from `application.yml` via the injected `PiiPciProperties` bean (e.g., `app.pii.patterns.EMAIL`, `app.pci.patterns.VISA`).
         *   Excludes common binary file types and irrelevant directories (e.g., `.git`, `target`, `build`).
         *   Returns a list of `PiiPciFinding` objects.
     *   **`YamlParserService` / `YamlParserServiceImpl`:** Newly added. Provides a basic service to parse a YAML file (given its path) into a `Map<String, Object>` using SnakeYAML. This can be leveraged for deeper analysis of project-specific YAML configurations if needed in the future.
@@ -95,13 +100,15 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **`CallFlowAnalyzer.java`:** Builds detailed call flow sequences.
 *   **`DaoAnalyzer.java`:** Utility class for `DaoAnalysisServiceImpl` to find SQL queries and table names (includes basic support for SQL in string variables).
 *   **`SoapWsdlParser.java`**, **`YamlParser.java`**: Existing parsers.
-*   **`LoggerInsightsServiceImpl.java`**: Continuously refine and expand PII/PCI keyword patterns based on real-world examples and feedback. **Patterns are now externalized to `application.yml`.**
+*   **`LoggerInsightsServiceImpl.java`**: PII/PCI keyword patterns externalized to `application.yml` - ✅ DONE (via `PiiPciProperties`).
     *   [COMPLETED] Ensure `org.apache.cxf.jaxrs.swagger` package is available (related to `RestConfig.java` compilation error - resolved by adding `cxf-rt-rs-service-description-swagger` dependency).
     *   **Deeper YAML Parsing**: Basic `YamlParserService` implemented. Further integration and use depend on identifying specific YAML files within user projects that require deep parsing for meaningful data extraction.
+    *   **Output Directory Management**: `AnalysisController.java` now deletes pre-existing `docs_*` output directories before each analysis run. - ✅ DONE.
+    *   **NPE Fixes**: `ClassMetadata.java` and `MethodMetadata.java` have their List fields initialized. - ✅ DONE.
 
 ### 2.6. Controller - `com.codedocgen.controller`
 
-*   **`AnalysisController.java`:** Orchestrates analysis, populates and returns `ParsedDataResponse` including `dbAnalysis` (with `operationsByClass` and `classesByEntity`) and `piiPciFindings`.
+*   **`AnalysisController.java`:** Orchestrates analysis, populates and returns `ParsedDataResponse` including `dbAnalysis` (with `operationsByClass` and `classesByEntity`) and `piiPciFindings`. Manages cleanup of previous output directories (`docs_*`) within the `outputBasePath` before analysis.
 
 ## 3. Frontend Details (`codedocgen-frontend`)
 
@@ -184,9 +191,9 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Deeper YAML parsing if used for project configuration.
     *   **`DaoAnalyzer.java`**: Handle more complex cases of SQL in variables or constructed dynamically (currently basic support).
     *   **`LoggerInsightsServiceImpl.java`**: Continuously refine and expand PII/PCI keyword patterns based on real-world examples and feedback. ~~Consider externalizing patterns for easier configuration.~~ **Patterns are now externalized to `application.yml`.**
-    *   **`PiiPciDetectionServiceImpl.java`**: Ensure robust exclusion of binary/irrelevant files and optimize regex performance for large repositories. Patterns are externalized to `application.yml`.
+    *   **`PiiPciDetectionServiceImpl.java`**: Ensure robust exclusion of binary/irrelevant files and optimize regex performance for large repositories. Patterns are externalized to `application.yml` (via `PiiPciProperties`). - ✅ DONE.
     *   [COMPLETED] Ensure `org.apache.cxf.jaxrs.swagger` package is available (related to `RestConfig.java` compilation error - resolved by adding `cxf-rt-rs-service-description-swagger` dependency).
-    *   **Deeper YAML Parsing**: Basic `YamlParserService` implemented. Further integration and use depend on identifying specific YAML files within user projects that require deep parsing for meaningful data extraction.
+    *   **Deeper YAML Parsing**: Basic `YamlParserService` implemented. Further integration and use depend on identifying specific YAML files within user projects that require deep parsing for meaningful data extraction. - ✅ DONE.
 *   **Diagrams & Visualization:**
     *   More interactive call flow visualization beyond current expand/collapse. (Note: Textual representation has been enhanced with a clean format and copy functionality).
 *   **Frontend Enhancements:**
@@ -201,6 +208,12 @@ This document summarizes the current state of the CodeDocGen project, covering b
 *   **Export Features:** Confluence publishing, PDF/HTML downloads (future scope).
 
 ## Recent Updates (Reflecting latest changes)
+- Enterprise features for custom Maven settings, OS-aware executable paths (Maven, Graphviz), and SSL truststores are fully integrated.
+- JavaParser enhanced for multi-module Maven projects and optimized dependency resolution (using `mvn dependency:build-classpath -DincludeScope=compile` and improved `JarTypeSolver` usage).
+- PII/PCI detection mechanism refactored to use a type-safe `@ConfigurationProperties` class (`PiiPciProperties.java`) for loading patterns from `application.yml`.
+- Output file management: `AnalysisController` now cleans up old `docs_*` directories before new analysis.
+- NullPointerExceptions in metadata classes resolved by initializing collections.
+- Application startup issues (port conflicts, bean creation errors) resolved.
 - Diagrams generated as SVG for quality and Confluence.
 - CORS enabled for `/generated-output/**`.
 - JavaParser upgraded for Java 7-21 compatibility.
@@ -224,20 +237,20 @@ This document summarizes the current state of the CodeDocGen project, covering b
     *   Generation of Database Schema diagrams linking DAOs to tables.
     *   **New `DbAnalysisResult` DTO in backend providing `operationsByClass` and `classesByEntity` maps.**
     *   **Frontend `DatabasePage.js` refactored to display an entity-centric view ("Entities and Interacting Classes") and a detailed DAO operation view (now including method names).**
-    *   **Backend logic to remove redundant service interfaces from DAO listings if their implementation is present.**
+    *   **Backend logic to remove redundant service interfaces from DAO listings if their implementation is present.** - ✅ DONE.
 - **Dependency Management:**
-    - Added `cxf-rt-rs-service-description-swagger` to `pom.xml` to resolve compilation issues with Swagger and CXF JAX-RS.
+    - Added `cxf-rt-rs-service-description-swagger` to `pom.xml` to resolve compilation issues with Swagger and CXF JAX-RS. - ✅ DONE.
 - **Backend TODOs Addressed:**
     *   `EndpointExtractorServiceImpl.java`: Support for `@RequestMapping` method attribute and `@WebMethod` (JAX-WS). - ✅ DONE
     *   `ProjectDetectorServiceImpl.java`: Added Gradle support for Spring Boot version detection (with regex fixes). - ✅ DONE
-    *   `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced.
-    *   `DaoAnalyzer.java`: Basic support for SQL in variables.
+    *   `DocumentationServiceImpl.java`: Method summaries now include called methods/external calls; project summary enhanced. - ✅ DONE
+    *   `DaoAnalyzer.java`: Basic support for SQL in variables. - ✅ DONE
 - **New Feature: Comprehensive PII/PCI Scanning**:
-    *   Added `PiiPciDetectionService` and its implementation to scan the entire repository for PII/PCI data using configurable patterns from `application.yml`.
-    *   New `PiiPciFinding` model created.
-    *   `ParsedDataResponse` updated to include `piiPciFindings`.
-    *   Frontend `PiiPciScanPage.js` created to display these findings with search and filtering capabilities.
-    *   Sidebar updated with a new "PCI/PII Scan" tab.
+    *   Added `PiiPciDetectionService` and its implementation to scan the entire repository for PII/PCI data using configurable patterns from `application.yml` (via `PiiPciProperties`). - ✅ DONE.
+    *   New `PiiPciFinding` model created. - ✅ DONE.
+    *   `ParsedDataResponse` updated to include `piiPciFindings`. - ✅ DONE.
+    *   Frontend `PiiPciScanPage.js` created to display these findings with search and filtering capabilities. - ✅ DONE.
+    *   Sidebar updated with a new "PCI/PII Scan" tab. - ✅ DONE.
 
 (Removed the old "New Feature: DAO/JDBC Analysis" section as its content is now integrated above and in the main sections) 
 

@@ -1,11 +1,11 @@
 package com.codedocgen.service.impl;
 
+import com.codedocgen.config.PiiPciProperties;
 import com.codedocgen.model.PiiPciFinding;
 import com.codedocgen.service.PiiPciDetectionService;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -24,25 +24,31 @@ public class PiiPciDetectionServiceImpl implements PiiPciDetectionService {
 
     private static final Logger logger = LoggerFactory.getLogger(PiiPciDetectionServiceImpl.class);
 
-    // It's assumed that pii.patterns and pci.patterns are maps in application.yml
-    // e.g. pii.patterns.SSN=\\"[0-9]{3}-[0-9]{2}-[0-9]{4}\\"
-    @Value("#{${pii.patterns:{}}}") 
-    private Map<String, String> piiPatternStrings;
-
-    @Value("#{${pci.patterns:{}}}")
-    private Map<String, String> pciPatternStrings;
+    private final PiiPciProperties piiPciProperties;
+    private Map<String, String> piiPatternStrings; // Keep for init logic, populated from piiPciProperties
+    private Map<String, String> pciPatternStrings; // Keep for init logic, populated from piiPciProperties
 
     private final Map<String, Pattern> compiledPiiPatterns = new HashMap<>();
     private final Map<String, Pattern> compiledPciPatterns = new HashMap<>();
 
+    // Constructor injection for PiiPciProperties
+    public PiiPciDetectionServiceImpl(PiiPciProperties piiPciProperties) {
+        this.piiPciProperties = piiPciProperties;
+    }
+
     @PostConstruct
     public void init() {
-        if (this.piiPatternStrings == null) {
-            logger.warn("[PiiPciDetectionService-Init] piiPatternStrings was null after injection, initializing to empty map.");
+        if (piiPciProperties != null && piiPciProperties.getPii() != null && piiPciProperties.getPii().getPatterns() != null) {
+            this.piiPatternStrings = piiPciProperties.getPii().getPatterns();
+        } else {
+            logger.warn("[PiiPciDetectionService-Init] PII patterns not found in configuration properties, initializing to empty map.");
             this.piiPatternStrings = new HashMap<>();
         }
-        if (this.pciPatternStrings == null) {
-            logger.warn("[PiiPciDetectionService-Init] pciPatternStrings was null after injection, initializing to empty map.");
+
+        if (piiPciProperties != null && piiPciProperties.getPci() != null && piiPciProperties.getPci().getPatterns() != null) {
+            this.pciPatternStrings = piiPciProperties.getPci().getPatterns();
+        } else {
+            logger.warn("[PiiPciDetectionService-Init] PCI patterns not found in configuration properties, initializing to empty map.");
             this.pciPatternStrings = new HashMap<>();
         }
 

@@ -33,6 +33,7 @@ public class ParsedDataResponse {
     private DbAnalysisResult dbAnalysis; // New field for the comprehensive DB analysis
     private List<LogStatement> logStatements; // Added field for log statements
     private List<PiiPciFinding> piiPciFindings; // New field
+    private String errorMessage; // Field to hold an error message if analysis fails
 
     // Consider adding fields for call flows, DAO info, etc., as parsing capabilities are built.
 
@@ -69,5 +70,14 @@ public class ParsedDataResponse {
 
     public void setPiiPciFindings(List<PiiPciFinding> piiPciFindings) {
         this.piiPciFindings = piiPciFindings;
+    }
+
+    // Getter and Setter for errorMessage
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage;
     }
 } 

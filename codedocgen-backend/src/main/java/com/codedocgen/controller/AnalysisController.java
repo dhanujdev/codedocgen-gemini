@@ -47,6 +47,9 @@ import com.codedocgen.model.PiiPciFinding;
 import com.codedocgen.service.PiiPciDetectionService;
 import com.codedocgen.service.YamlParserService;
 
+// For FileUtils.deleteDirectory
+import org.apache.commons.io.FileUtils;
+
 @RestController
 @RequestMapping("/api/analysis")
 public class AnalysisController {
@@ -107,14 +110,20 @@ public class AnalysisController {
 
     @PostMapping("/analyze")
     public ResponseEntity<ParsedDataResponse> analyzeRepository(@RequestBody RepoRequest repoRequest) {
-        String repoUrl = repoRequest.getRepoUrl();
-        if (repoUrl == null || repoUrl.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(null); // Or a custom error DTO
-        }
-        repoUrl = repoUrl.trim();
+        logger.info("Received request to /api/analysis/analyze with repoUrl: {}", repoRequest != null ? repoRequest.getRepoUrl() : "null RepoRequest");
 
-        // Extract project name from URL
-        String extractedProjectName;
+        String repoUrl = null;
+        if (repoRequest != null && repoRequest.getRepoUrl() != null) {
+            repoUrl = repoRequest.getRepoUrl().trim();
+        }
+
+        if (repoUrl == null || repoUrl.isEmpty()) {
+            logger.warn("/api/analysis/analyze: repoUrl is null or empty.");
+            return ResponseEntity.badRequest().body(null);
+        }
+        logger.info("/api/analysis/analyze: Processing repoUrl: {}", repoUrl);
+
+        String extractedProjectName = "unknown_project";
         try {
             extractedProjectName = extractProjectNameFromUrl(repoUrl);
         } catch (URISyntaxException e) {
@@ -125,13 +134,34 @@ public class AnalysisController {
         String uniqueRepoId = UUID.randomUUID().toString().substring(0, 8);
         File localRepoPath = new File(repoStoragePath, "repo_" + uniqueRepoId);
         File outputDir = new File(outputBasePath, "docs_" + uniqueRepoId);
-        if (!outputDir.mkdirs()) {
-            logger.error("Could not create output directory: {}", outputDir.getAbsolutePath());
-            // Consider returning a more specific error response
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build(); 
+
+        // Clean up the general outputBasePath directory BEFORE creating a new unique outputDir
+        // This will remove all previously generated docs_* directories
+        File baseOutputDir = new File(outputBasePath);
+        if (baseOutputDir.exists()) {
+            File[] existingOutputDirs = baseOutputDir.listFiles(pathname -> pathname.isDirectory() && pathname.getName().startsWith("docs_"));
+            if (existingOutputDirs != null) {
+                for (File dir : existingOutputDirs) {
+                    logger.info("Deleting old output directory: {}", dir.getAbsolutePath());
+                    try {
+                        FileUtils.deleteDirectory(dir);
+                    } catch (IOException e) {
+                        logger.warn("Could not delete old output directory {}: {}", dir.getAbsolutePath(), e.getMessage());
+                    }
+                }
+            }
         }
 
+        if (!outputDir.mkdirs()) {
+            logger.error("Could not create output directory: {}. Check permissions and path.", outputDir.getAbsolutePath());
+            ParsedDataResponse errorResponse = new ParsedDataResponse();
+            errorResponse.setErrorMessage("Failed to create output directory: " + outputDir.getAbsolutePath());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse); 
+        }
+        logger.info("/api/analysis/analyze: Output directory set to: {}", outputDir.getAbsolutePath());
+
         try {
+            logger.info("/api/analysis/analyze: Starting analysis for {}", repoUrl);
             logger.info("Attempting to clone repository: {}", repoUrl);
             gitService.cloneRepository(repoUrl, localRepoPath.getAbsolutePath());
             logger.info("Repository cloned to: {}", localRepoPath.getAbsolutePath());
@@ -307,23 +337,32 @@ public class AnalysisController {
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
-            logger.error("Error during repository analysis for URL {}: {}", repoUrl, e.getMessage(), e);
-            // Ensure partial cleanup if things go very wrong early on
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null); // Or custom error DTO
+            logger.error("!!! UNHANDLED EXCEPTION in /api/analysis/analyze for URL {} !!!: Type: {}, Message: {}", repoUrl, e.getClass().getName(), e.getMessage(), e);
+            ParsedDataResponse errorResponse = new ParsedDataResponse();
+            errorResponse.setErrorMessage("Internal server error during analysis: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         } finally {
+            logger.info("/api/analysis/analyze: Starting finally block for repoUrl: {}", repoUrl != null ? repoUrl : "UNKNOWN_URL");
             try {
-                logger.info("Deleting cloned repository at: {}", localRepoPath.getAbsolutePath());
-                gitService.deleteRepository(localRepoPath);
+                if (localRepoPath.exists()) { // Check if directory was created before attempting to delete
+                    logger.info("Deleting cloned repository at: {}", localRepoPath.getAbsolutePath());
+                    gitService.deleteRepository(localRepoPath);
+                    logger.info("Successfully deleted cloned repository: {}", localRepoPath.getAbsolutePath());
+                } else {
+                    logger.info("Cloned repository path {} did not exist, skipping deletion.", localRepoPath.getAbsolutePath());
+                }
             } catch (IOException e) {
-                logger.error("Error deleting repository directory {}: {}", localRepoPath.getAbsolutePath(), e.getMessage(), e);
+                logger.error("Error deleting repository directory {} in finally block: {}", localRepoPath.getAbsolutePath(), e.getMessage(), e);
             }
             // Optionally, also delete the outputDir if it's temporary and not meant to be served directly
+            // This was already present and commented out, leaving as is.
             // try {
             //     logger.info("Deleting output directory: {}", outputDir.getAbsolutePath());
             //     FileUtils.deleteDirectory(outputDir);
             // } catch (IOException e) {
             //     logger.error("Error deleting output directory {}: {}", outputDir.getAbsolutePath(), e.getMessage(), e);
             // }
+            logger.info("/api/analysis/analyze: Finished finally block for repoUrl: {}", repoUrl != null ? repoUrl : "UNKNOWN_URL");
         }
     }
     
