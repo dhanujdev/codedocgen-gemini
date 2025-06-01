@@ -1,21 +1,22 @@
 package com.codedocgen.model;
 
+import lombok.Data;
 import java.util.List;
+import java.util.ArrayList;
 
+/**
+ * Metadata for a Java field
+ */
 public class FieldMetadata {
     private String name;
     private String type;
-    private List<String> annotations; // List of annotation strings
+    private List<String> annotations = new ArrayList<>();
     private String visibility; // e.g., public, private, protected, default
-    private boolean isStatic;   // Optional
-    private boolean isFinal;    // Optional
+    private boolean isStatic;
+    private boolean isFinal;
     private String initializer; // Added for default values, e.g. in annotations
 
-    public FieldMetadata() {
-        // Default constructor
-    }
-
-    // Getters and Setters
+    // Getter and Setter methods
     public String getName() {
         return name;
     }
@@ -52,16 +53,16 @@ public class FieldMetadata {
         return isStatic;
     }
 
-    public void setStatic(boolean aStatic) {
-        isStatic = aStatic;
+    public void setStatic(boolean isStatic) {
+        this.isStatic = isStatic;
     }
 
     public boolean isFinal() {
         return isFinal;
     }
 
-    public void setFinal(boolean aFinal) {
-        isFinal = aFinal;
+    public void setFinal(boolean isFinal) {
+        this.isFinal = isFinal;
     }
 
     public String getInitializer() {
@@ -71,6 +72,4 @@ public class FieldMetadata {
     public void setInitializer(String initializer) {
         this.initializer = initializer;
     }
-    
-    // Add other relevant details if needed, like full declaration string
 } 

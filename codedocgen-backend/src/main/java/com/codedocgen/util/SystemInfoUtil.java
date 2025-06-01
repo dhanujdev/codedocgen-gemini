@@ -1,39 +1,139 @@
 package com.codedocgen.util;
 
-import java.io.BufferedReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
-import java.io.IOException;
+import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.util.Locale;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * Utility class for system information and path operations
+ */
 public class SystemInfoUtil {
-
-    private static final Logger LOGGER = Logger.getLogger(SystemInfoUtil.class.getName());
-    private static String osName = System.getProperty("os.name").toLowerCase(Locale.ENGLISH);
-
+    private static final Logger logger = LoggerFactory.getLogger(SystemInfoUtil.class);
+    
+    private static final String OS_NAME = System.getProperty("os.name").toLowerCase();
+    private static final boolean IS_WINDOWS = OS_NAME.contains("win");
+    private static final boolean IS_MAC = OS_NAME.contains("mac");
+    private static final boolean IS_LINUX = OS_NAME.contains("nux") || OS_NAME.contains("nix");
+    
+    /**
+     * Checks if the system is running Windows
+     * @return true if Windows, false otherwise
+     */
     public static boolean isWindows() {
-        return osName.contains("windows");
+        return IS_WINDOWS;
     }
-
+    
+    /**
+     * Checks if the system is running macOS
+     * @return true if macOS, false otherwise
+     */
     public static boolean isMac() {
-        return osName.contains("mac");
+        return IS_MAC;
     }
-
+    
+    /**
+     * Checks if the system is running Linux
+     * @return true if Linux, false otherwise
+     */
     public static boolean isLinux() {
-        return osName.contains("linux") || osName.contains("nix");
+        return IS_LINUX;
     }
-
+    
+    /**
+     * Gets the operating system name
+     * @return operating system name
+     */
+    public static String getOsName() {
+        return OS_NAME;
+    }
+    
+    /**
+     * Gets the operating system name and version
+     * @return operating system name and version
+     */
     public static String getOperatingSystem() {
-        if (isWindows()) {
-            return "windows";
-        } else if (isMac()) {
-            return "macos";
-        } else if (isLinux()) {
-            return "linux";
+        String osName = System.getProperty("os.name");
+        String osVersion = System.getProperty("os.version");
+        String osArch = System.getProperty("os.arch");
+        return osName + " " + osVersion + " (" + osArch + ")";
+    }
+    
+    /**
+     * Gets the Maven version installed on the system
+     * @return Maven version, or "Not available" if Maven is not found
+     */
+    public static String getMavenVersion() {
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder();
+            String mavenCommand = isWindows() ? "mvn.cmd" : "mvn";
+            processBuilder.command(mavenCommand, "--version");
+            processBuilder.redirectErrorStream(true);
+            
+            Process process = processBuilder.start();
+            StringBuilder output = new StringBuilder();
+            
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                    if (line.startsWith("Apache Maven")) {
+                        boolean completed = process.waitFor(1, TimeUnit.SECONDS);
+                        if (!completed) {
+                            process.destroyForcibly();
+                        }
+                        return line.trim();
+                    }
+                }
+            }
+            
+            boolean completed = process.waitFor(5, TimeUnit.SECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                logger.warn("Maven version check timed out");
+                return "Unknown version (check timed out)";
+            }
+            
+            if (process.exitValue() != 0) {
+                logger.warn("Maven version check failed with exit code: {}", process.exitValue());
+                return "Not available";
+            }
+            
+            return "Maven detected (version details not found)";
+        } catch (Exception e) {
+            logger.warn("Failed to determine Maven version: {}", e.getMessage());
+            return "Not available";
         }
-        return "unknown";
+    }
+    
+    /**
+     * Gets the path to the system temp directory
+     * @return system temp directory path
+     */
+    public static String getTempDir() {
+        return System.getProperty("java.io.tmpdir");
+    }
+    
+    /**
+     * Gets the user home directory
+     * @return user home directory path
+     */
+    public static String getUserHome() {
+        return System.getProperty("user.home");
+    }
+    
+    /**
+     * Gets the current working directory
+     * @return current working directory path
+     */
+    public static String getCurrentWorkingDir() {
+        return System.getProperty("user.dir");
     }
 
     /**
@@ -49,15 +149,15 @@ public class SystemInfoUtil {
         if (configuredPath != null && !configuredPath.trim().isEmpty()) {
             File execFile = new File(configuredPath);
             if (execFile.exists() && execFile.canExecute()) {
-                LOGGER.info("Using configured executable path: " + configuredPath);
+                logger.info("Using configured executable path: {}", configuredPath);
                 return configuredPath;
             } else if (execFile.isAbsolute()) {
-                LOGGER.warning("Configured executable path does not exist or is not executable: " + configuredPath);
-                LOGGER.warning("Falling back to default command: " + defaultCommand);
+                logger.warn("Configured executable path does not exist or is not executable: {}", configuredPath);
+                logger.warn("Falling back to default command: {}", defaultCommand);
                 return defaultCommand;
             } else {
                 // It's a relative path or just a command name - we'll use it and let the OS resolve it
-                LOGGER.info("Using configured executable name: " + configuredPath);
+                logger.info("Using configured executable name: {}", configuredPath);
                 return configuredPath;
             }
         }
@@ -71,67 +171,81 @@ public class SystemInfoUtil {
     }
     
     /**
-     * Checks if the given executable is available on the system PATH.
-     *
-     * @param executableName The name of the executable to check
-     * @return true if the executable is found on PATH, false otherwise
+     * Checks if an executable exists in the system PATH
+     * @param executableName name of the executable to check
+     * @return true if the executable is found, false otherwise
      */
-    public static boolean isExecutableOnPath(String executableName) {
-        try {
-            String command = isWindows() ? "where" : "which";
-            ProcessBuilder processBuilder = new ProcessBuilder(command, executableName);
-            Process process = processBuilder.start();
-            int exitCode = process.waitFor();
-            return exitCode == 0;
-        } catch (IOException | InterruptedException e) {
-            LOGGER.log(Level.WARNING, "Error checking if " + executableName + " is on PATH", e);
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
+    public static boolean isExecutableInPath(String executableName) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null) {
             return false;
         }
-    }
-
-    public static String getMavenVersion() {
-        String mvnCommand = isWindows() ? "mvn.cmd" : "mvn";
-        try {
-            ProcessBuilder processBuilder = new ProcessBuilder(mvnCommand, "--version");
-            processBuilder.redirectErrorStream(true);
-            Process process = processBuilder.start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append(System.lineSeparator());
-                    if (line.startsWith("Apache Maven")) {
-                        // Example line: Apache Maven 3.8.1 (05c21c65bdfed0f71a2f2ada8b84da59358ea37)
-                        return line.split(" ")[2]; // Extracts "3.8.1"
-                    }
+        
+        String[] pathDirs = pathEnv.split(File.pathSeparator);
+        for (String pathDir : pathDirs) {
+            Path execPath = Paths.get(pathDir, executableName);
+            if (Files.isExecutable(execPath)) {
+                return true;
+            }
+            
+            // For Windows, also check with .exe extension
+            if (IS_WINDOWS && !executableName.endsWith(".exe")) {
+                execPath = Paths.get(pathDir, executableName + ".exe");
+                if (Files.isExecutable(execPath)) {
+                    return true;
                 }
             }
-
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                LOGGER.log(Level.WARNING, "Maven version check exited with code: " + exitCode + ". Output:\n" + output.toString());
-                return "Error detecting Maven version";
-            }
-            // Fallback if "Apache Maven" line wasn't found but command succeeded
-            LOGGER.log(Level.INFO, "Maven --version output:\n" + output.toString());
-            return "Maven found, version not parsed from output.";
-
-        } catch (IOException | InterruptedException e) {
-            LOGGER.log(Level.SEVERE, "Error executing Maven command or reading output", e);
-            Thread.currentThread().interrupt(); // Restore interruption status
-            return "Error detecting Maven version: " + e.getMessage();
         }
+        
+        return false;
     }
-
-    public static void main(String[] args) {
-        // For testing purposes
-        System.out.println("Operating System: " + getOperatingSystem());
-        System.out.println("Maven Version: " + getMavenVersion());
-        System.out.println("Is 'mvn' on PATH: " + isExecutableOnPath("mvn"));
-        System.out.println("Is 'dot' on PATH: " + isExecutableOnPath("dot"));
+    
+    /**
+     * Finds the full path to an executable in the system PATH
+     * @param executableName name of the executable to find
+     * @return the full path if found, null otherwise
+     */
+    public static String findExecutablePath(String executableName) {
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv == null) {
+            return null;
+        }
+        
+        String[] pathDirs = pathEnv.split(File.pathSeparator);
+        for (String pathDir : pathDirs) {
+            Path execPath = Paths.get(pathDir, executableName);
+            if (Files.isExecutable(execPath)) {
+                return execPath.toString();
+            }
+            
+            // For Windows, also check with .exe extension
+            if (IS_WINDOWS && !executableName.endsWith(".exe")) {
+                execPath = Paths.get(pathDir, executableName + ".exe");
+                if (Files.isExecutable(execPath)) {
+                    return execPath.toString();
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Sanitizes file paths for safe logging (removes sensitive information)
+     * @param path file path to sanitize
+     * @return sanitized path
+     */
+    public static String sanitizePathForLogging(String path) {
+        if (path == null) {
+            return null;
+        }
+        
+        // Replace user home directory with ~
+        String userHome = System.getProperty("user.home");
+        if (path.startsWith(userHome)) {
+            path = "~" + path.substring(userHome.length());
+        }
+        
+        return path;
     }
 } 

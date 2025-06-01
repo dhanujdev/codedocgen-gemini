@@ -99,7 +99,9 @@ public class DocumentationServiceImpl implements DocumentationService {
                                 .append(method.isAbstract() ? "abstract " : "")
                                 .append(method.getReturnType()).append(" ")
                                 .append(method.getName()).append("(")
-                                .append(String.join(", ", method.getParameters()))
+                                .append(method.getParameters() != null ? method.getParameters().stream()
+                                        .map(param -> param.toString())
+                                        .collect(Collectors.joining(", ")) : "")
                                 .append(")`**");
                         if (method.getAnnotations() != null && !method.getAnnotations().isEmpty()) {
                             markdownBuilder.append("\n  - Annotations: ").append(method.getAnnotations().stream().map(a -> "`" + a + "`").collect(Collectors.joining(", "))).append("\n");

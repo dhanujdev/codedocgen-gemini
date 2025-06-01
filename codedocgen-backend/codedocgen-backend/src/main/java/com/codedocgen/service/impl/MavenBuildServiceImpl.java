@@ -71,7 +71,7 @@ public class MavenBuildServiceImpl implements MavenBuildService {
         if (!projectDir.exists() || !projectDir.isDirectory()) {
             String errorMsg = "Project directory " + projectDir.getAbsolutePath() + " does not exist or is not a directory.";
             logger.error(errorMsg);
-            return new MavenExecutionResult(-1, "Project directory not found: " + projectDir.getAbsolutePath());
+            return new MavenExecutionResult( -1, "Project directory not found: " + projectDir.getAbsolutePath());
         }
 
         // Use the executable command helper to get OS-aware mvn command
@@ -249,8 +249,8 @@ public class MavenBuildServiceImpl implements MavenBuildService {
         }
         
         // Check for specific versions if a more general one (e.g. 11 for 11.0.2) is passed
-        for (Map.Entry<String, String> entry : configuredJdkPaths.entrySet()) {
-            if (normalizedVersion.startsWith(entry.getKey())) {
+        for(Map.Entry<String, String> entry : configuredJdkPaths.entrySet()){
+            if(normalizedVersion.startsWith(entry.getKey())){
                 logger.info("Found configured JDK path for Java {} (matched {}): {}", normalizedVersion, entry.getKey(), entry.getValue());
                 return entry.getValue();
             }

@@ -8,8 +8,7 @@ server:
 logging:
   level:
     com.codedocgen.service.impl.JavaParserServiceImpl: DEBUG
-    # com.codedocgen.service.impl.JavaParserServiceImpl$ClassMetadataVisitor: TRACE # Old name commented out
-    com.codedocgen.parser.ClassMetadataVisitorLogger: TRACE # New, simpler logger name
+    com.codedocgen.parser.ClassMetadataVisitorLogger: TRACE
     org.springframework.web: INFO
     org.hibernate.type.descriptor.sql: TRACE # Added for Hibernate SQL logging, if needed later
 
@@ -19,25 +18,40 @@ app:
   outputBasePath: ./output # Relative to project root
   docsStoragePath: ${app.outputBasePath}/docs
   diagramsStoragePath: ${app.outputBasePath}/diagrams
-  # Logger Insights Keywords Regex - YAML multi-line syntax for readability
-  pii-keywords-regex: >-
-    \b(ssn|socialsecurity|social_security_number|socsec|driverlicense|driver_license|dl|licnum|passportnumber|passport_number|nationalid|national_id|healthrecord|medicalrecord|health_record|medical_record|ehr|emr|biometric|geolocation|ipaddress|ip_address|deviceid|device_id|cookieid|cookie_id|macaddress|mac_address|imei|imsi|ethereumaddress|eth_address|bitcoinaddress|btc_address|cryptowallet|crypto_wallet|privatekey|priv_key|seedphrase|seed_phrase|email|e-mail|mailaddr|phone|phoneno|phnno|telephone|contactnum|address|addr|streetaddr|homeaddr|dob|dateofbirth|birthdate|mother's maiden name|mothersmaidenname|mmn|username|user_name|uname|userid|user_id|uid|firstname|first_name|fname|firstnm|lastname|last_name|lname|lastnm|fullname|full_name|name|credential|credentials|personalinfo|personal_info|citizenid|citizen_id|voterid|voter_id|taxid|taxpayerid|tin|licenseplate|license_plate|vin|vehicleidentificationnumber)\b
-  pci-keywords-regex: >-
-    \b(creditcard|credit_card|cardnum|card_num|cardnbr|ccnum|ccn|cvv|cvc|csc|cardverification|verificationcode|securitycode|cardsecuritycode|pan|primaryaccountnumber|primary_account_number|cardholder|card_holder_name|expdate|expirationdate|exp_date|expirydate|trackdata|track_data|magstripe|magnetic_stripe|pinblock|pin_block|servicecode|service_code|cardnumber|paymentaccountnumber|payment_account_number|accountnum|acctnum|iban|internationalbankaccountnumber|bankaccount|bank_account|routingnumber|routing_number|achdata|ach_data|wiretransfer|wire_transfer|financialdata|financial_info|paymentinfo|payment_info|vcn|virtualcardnumber|virtual_card_number|tokenizedcard|tokenized_card)\b
-  general-sensitive-keywords-regex: >-
-    \b(password|passwd|secret|token|apikey)\b 
-  # Enterprise configuration settings
+  
+  # Enterprise features
   git:
     username: ${GIT_USERNAME:} # Allow override via env var, empty by default
     password: ${GIT_PASSWORD:} # Allow override via env var, empty by default
+    # Added for disk space management when cloning repositories
+    shallowClone: true 
+    depth: 1 # Clone only 1 commit deep for smaller disk usage
+    cloneTimeout: 300 # 5 minutes timeout for clone operations
+    
   maven:
     settings:
       path: ${MAVEN_SETTINGS_PATH:} # e.g., /path/to/enterprise/settings.xml or classpath:enterprise-settings.xml
     executable:
       path: ${MAVEN_EXECUTABLE_PATH:mvn} # Defaults to 'mvn' assuming it's on PATH
+      
   graphviz:
     dot:
       executable:
         path: ${GRAPHVIZ_DOT_PATH:dot} # Defaults to 'dot' assuming it's on PATH
-  ssl:
-    trust-store-password: ${SSL_TRUST_STORE_PASSWORD:changeit} # Default truststore password 
+  
+  truststore:
+    path: ${TRUSTSTORE_PATH:classpath:truststore.jks} # Path to truststore
+    password: ${TRUSTSTORE_PASSWORD:changeit} # Truststore password
+  
+  # PII/PCI detection settings
+  pii-keywords-regex: "(ssn|social\\s*security|credit\\s*card|card\\s*number|cvv|cvc|password|secret|key)"
+  pci-keywords-regex: "(card\\s*number|cc\\s*num|cvv|cvc|expir(y|ation)\\s*date)"
+  general-sensitive-keywords-regex: "(password|secret|key|token|credential|auth)"
+  
+  # Resource management settings
+  resourceManagement:
+    excludeTestDirs: true # Skip processing test directories to save disk space
+    maxJarDependencies: 100 # Max number of JARs to process to avoid memory issues
+    includeTestScope: false # Don't include test dependencies
+    autoCleanup: true # Automatically clean up temporary files
+    maxTempFileAge: 1800 # Clean up temporary files older than 30 minutes (in seconds) 

@@ -1,11 +1,20 @@
 package com.codedocgen.model;
 
+/**
+ * Enum representing different types of diagrams that can be generated
+ */
 public enum DiagramType {
     CLASS_DIAGRAM,
+    SEQUENCE_DIAGRAM,
+    ER_DIAGRAM,
     ENTITY_RELATIONSHIP_DIAGRAM,
-    SEQUENCE_DIAGRAM, // For call flows
     COMPONENT_DIAGRAM,
-    USECASE_DIAGRAM, // Added for Usecase Diagrams
-    DATABASE_DIAGRAM, // For database schema visualization
-    // Add more types as needed
+    PACKAGE_DIAGRAM,
+    ACTIVITY_DIAGRAM,
+    STATE_DIAGRAM,
+    DEPLOYMENT_DIAGRAM,
+    USE_CASE_DIAGRAM,
+    USECASE_DIAGRAM,
+    CALL_FLOW_DIAGRAM,
+    DATABASE_DIAGRAM
 } 

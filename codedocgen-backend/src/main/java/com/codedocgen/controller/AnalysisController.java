@@ -133,8 +133,8 @@ public class AnalysisController {
 
         try {
             logger.info("Attempting to clone repository: {}", repoUrl);
-            gitService.cloneRepository(repoUrl, localRepoPath.getAbsolutePath());
-            logger.info("Repository cloned to: {}", localRepoPath.getAbsolutePath());
+            File repository = gitService.cloneRepository(repoRequest.getRepoUrl(), localRepoPath.getAbsolutePath(), repoRequest.getBranch(), repoRequest.getUsername(), repoRequest.getPassword());
+            logger.info("Repository cloned to: {}", repository.getAbsolutePath());
 
             ParsedDataResponse response = new ParsedDataResponse();
             response.setProjectName(extractedProjectName);
@@ -314,7 +314,7 @@ public class AnalysisController {
             try {
                 logger.info("Deleting cloned repository at: {}", localRepoPath.getAbsolutePath());
                 gitService.deleteRepository(localRepoPath);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 logger.error("Error deleting repository directory {}: {}", localRepoPath.getAbsolutePath(), e.getMessage(), e);
             }
             // Optionally, also delete the outputDir if it's temporary and not meant to be served directly
@@ -322,7 +322,7 @@ public class AnalysisController {
             //     logger.info("Deleting output directory: {}", outputDir.getAbsolutePath());
             //     FileUtils.deleteDirectory(outputDir);
             // } catch (IOException e) {
-            //     logger.error("Error deleting output directory {}: {}", outputDir.getAbsolutePath(), e.getMessage(), e);
+            //     logger.error("Error deleting repository directory {}: {}", outputDir.getAbsolutePath(), e.getMessage(), e);
             // }
         }
     }

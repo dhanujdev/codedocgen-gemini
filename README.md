@@ -1,102 +1,67 @@
 # CodeDocGen - Enterprise Java Code Documentation Generator
 
-CodeDocGen is a full-stack application designed to analyze Java codebases, generate comprehensive documentation, and produce visual representations of the system architecture. It is built to handle enterprise-grade projects with robust security features.
+CodeDocGen is a full-stack application designed to analyze Java codebases, generate comprehensive documentation, and produce visual representations of the system architecture. It has been enhanced with enterprise readiness features for integration with corporate environments.
 
 ## Features
 
-- **Advanced Code Analysis**: Parse Java source code using JavaParser and JavaSymbolSolver for accurate symbol resolution.
-- **Visualization**: Generate class diagrams, sequence diagrams, ER diagrams, and more using PlantUML.
-- **REST API Documentation**: Extract and document REST endpoints and generate OpenAPI specifications.
-- **SOAP/WSDL Documentation**: Parse and document SOAP web services.
-- **Database Analysis**: Analyze DAO/Repository classes to understand database operations.
-- **Security Analysis**: Detect PII/PCI data in source code and logs.
-- **Modern UI**: Clean, responsive interface built with React and Material UI.
+- **Advanced Code Analysis**: Parse Java source code using JavaParser and JavaSymbolSolver for accurate symbol resolution
+- **Visualization**: Generate class diagrams, sequence diagrams, ER diagrams using PlantUML
+- **REST API Documentation**: Extract and document REST endpoints and generate OpenAPI specifications
+- **SOAP/WSDL Documentation**: Parse and document SOAP web services
+- **Database Analysis**: Analyze DAO/Repository classes to understand database operations
+- **Multi-Module Support**: Analyze complex multi-module Maven projects
 
-## Enterprise-Ready Features
+## Enterprise Features
 
-CodeDocGen has been enhanced with the following enterprise-specific features:
-
-1. **Secure Git Integration**: 
-   - Support for private repositories with username/password authentication
-   - Configurable credentials via environment variables
-
-2. **Custom Maven Integration**:
-   - Support for enterprise Maven settings.xml files 
-   - Works with both filesystem and classpath resources
-   - Secure handling of sensitive information in logs
-
-3. **SSL/TLS Trust Configuration**:
-   - Robust handling of enterprise truststore.jks for HTTPS operations
-   - Support for classpath and filesystem-based truststore files
-   - Truststore validation and early initialization
-
-4. **OS-Aware Path Management**:
-   - Enhanced path handling for executables across different operating systems
-   - Support for Windows, macOS, and Linux
-   - Automatic detection and validation of required executables
-
-5. **Configurable Diagram Generation**:
-   - OS-aware executable path handling for Graphviz dot
-   - Configurable path via application properties
-   - Automatic fallback for Windows installations
+- **Secure Git Integration**: Support for authentication with private enterprise Git repositories
+- **Custom Maven Settings**: Support for enterprise Maven settings.xml and repositories
+- **Truststore Integration**: Properly load and apply truststore for secure HTTPS operations
+- **OS-Specific Path Handling**: Support for Windows and Unix-based systems with configurable executable paths
+- **Test Exclusion**: Option to exclude test directories from analysis for performance optimization
 
 ## Project Structure
 
-The project consists of two main components:
-
-- **codedocgen-backend**: Spring Boot Java application that performs code analysis and provides REST APIs
-- **codedocgen-frontend**: React application that provides a user interface for the system
+- **codedocgen-backend**: Spring Boot backend service for code analysis and diagram generation
+- **codedocgen-frontend**: React frontend for visualization and navigation
+- **spec**: Project specifications and documentation
 
 ## Getting Started
 
-For detailed setup and deployment instructions, please refer to the following documents:
+See the README files in the respective directories for setup instructions:
 
-- [Backend Documentation](codedocgen-backend/README.md)
-- [Deployment Guide](DEPLOYMENT.md)
+- [Backend Setup](codedocgen-backend/README.md)
+- [Frontend Setup](codedocgen-frontend/README.md)
 
-## Configuration
+For deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
-Enterprise deployments can be configured via `application.yml` with the following properties:
+For detailed enterprise features specification, see [EnterpriseFeatures.md](spec/EnterpriseFeatures.md).
+
+## Enterprise Configuration
+
+Enterprise features can be configured via application properties or environment variables:
 
 ```yaml
 app:
   git:
-    username: ${GIT_USERNAME:} # Allow override via env var, empty by default
-    password: ${GIT_PASSWORD:} # Allow override via env var, empty by default
+    username: ${GIT_USERNAME:}
+    password: ${GIT_PASSWORD:}
   maven:
     settings:
-      path: ${MAVEN_SETTINGS_PATH:} # e.g., /path/to/enterprise/settings.xml or classpath:enterprise-settings.xml
+      path: ${MAVEN_SETTINGS_PATH:}
     executable:
-      path: ${MAVEN_EXECUTABLE_PATH:mvn} # Defaults to 'mvn' assuming it's on PATH
+      path: ${MAVEN_EXECUTABLE_PATH:mvn}
   graphviz:
     dot:
       executable:
-        path: ${GRAPHVIZ_DOT_PATH:dot} # Defaults to 'dot' assuming it's on PATH
-  ssl:
-    trust-store-password: ${SSL_TRUST_STORE_PASSWORD:changeit} # Default truststore password
+        path: ${GRAPHVIZ_DOT_PATH:dot}
+  truststore:
+    path: ${TRUSTSTORE_PATH:classpath:truststore.jks}
+    password: ${TRUSTSTORE_PASSWORD:changeit}
 ```
 
-Additionally, you can configure the server's SSL trust store:
+## Requirements
 
-```yaml
-server:
-  ssl:
-    trust-store: classpath:truststore.jks # or file:/path/to/truststore.jks
-    trust-store-password: ${SERVER_TRUST_STORE_PASSWORD:changeit}
-```
-
-## Docker Deployment
-
-The application can be built and deployed as a Docker container. See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions, including enterprise security considerations.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- [JavaParser](https://javaparser.org/) for Java code parsing
-- [PlantUML](https://plantuml.com/) for diagram generation
-- [Spring Boot](https://spring.io/projects/spring-boot) for backend framework
-- [React](https://reactjs.org/) for frontend framework
-- [Material UI](https://material-ui.com/) for UI components 
+- Java 17 or higher
+- Node.js 18 or higher
+- Maven 3.8 or higher
+- GraphViz (for diagram generation) 
