@@ -75,10 +75,6 @@ function App() {
 
   const handleCloseSnackbar = () => setError(null);
 
-  const handleNav = (itemKey) => { // Changed parameter to itemKey for clarity
-    setActiveSection(itemKey);
-  };
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />

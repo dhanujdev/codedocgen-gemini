@@ -109,6 +109,19 @@ server:
 
 The application can be built and deployed as a Docker container. See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions, including enterprise security considerations.
 
+## Vercel Deployment (Frontend)
+
+Vercel can host the React UI while the Spring Boot backend runs elsewhere (e.g., your own server, Render, Fly.io, etc.).
+
+1. Commit the included `vercel.json` so Vercel knows to build the app from `codedocgen-frontend` and publish the static `build` output.
+2. In the Vercel dashboard, create a new project from this repository. The default settings picked up from `vercel.json` (install → `npm install`, build → `npm run build`, output → `codedocgen-frontend/build`) work as-is.
+3. Under **Settings → Environment Variables**, set at least:
+   - `REACT_APP_API_URL` to the externally accessible backend URL ending in `/api` (for example, `https://your-backend.example.com/api`).
+   - Optional: `REACT_APP_PUBLISH_API_URL` if you run the optional publishing service on a different host; otherwise it falls back to `REACT_APP_API_URL`.
+4. Trigger a deployment. Vercel serves the compiled SPA and automatically rewrites unknown routes back to `index.html`, so client-side routing continues to work.
+
+> Note: Vercel does not run the Java backend. Make sure your backend is reachable from the deployed frontend, and that CORS is configured accordingly.
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

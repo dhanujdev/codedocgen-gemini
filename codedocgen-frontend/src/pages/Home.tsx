@@ -2,7 +2,6 @@ import React from 'react';
 import RepoForm from '../components/RepoForm';
 import Container from '@mui/material/Container';
 import Typography from '@mui/material/Typography';
-import Box from '@mui/material/Box';
 
 type HomePageProps = {
   onAnalyze: (repoUrl: string) => void;

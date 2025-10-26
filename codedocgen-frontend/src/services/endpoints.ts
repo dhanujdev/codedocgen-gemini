@@ -2,7 +2,7 @@
 // This can be useful if you have many endpoints and want to manage them in one place.
 // Alternatively, these can be defined directly in api.ts or within specific service modules.
 
-const API_ROOT = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api';
+const API_ROOT = process.env.REACT_APP_API_URL || 'http://localhost:8080/api';
 
 export const ENDPOINTS = {
   ANALYZE_REPO: `${API_ROOT}/repo/analyze`,

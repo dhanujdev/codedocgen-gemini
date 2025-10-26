@@ -1,0 +1,15 @@
+{
+  "builds": [
+    {
+      "src": "codedocgen-frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "codedocgen-frontend/build"
+      }
+    }
+  ],
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}

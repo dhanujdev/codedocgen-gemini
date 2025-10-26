@@ -25,7 +25,7 @@ const formatFlowSteps = (flowName: string, flowDescription: string, steps: FlowS
     let stepText = typeof step === 'string' ? step : `${step.action} ${step.details ? '(' + step.details + ')' : ''}`;
     
     // Strip parameters from the method call
-    stepText = stepText.replace(/\([^\)]*\)/g, '()');
+    stepText = stepText.replace(/\([^)]*\)/g, '()');
     
     // Remove UNRESOLVED_CALL prefixes before stripping parameters for lines that were just UNRESOLVED_CALL markers
     if (stepText.startsWith('UNRESOLVED_CALL: UNRESOLVED_CALL:')) {
@@ -35,12 +35,12 @@ const formatFlowSteps = (flowName: string, flowDescription: string, steps: FlowS
     }
     
     // Re-apply parameter stripping in case the prefix removal exposed parameters (e.g. for Customer.builder().firstName(UNKNOWN_PARAM_TYPE) )
-    stepText = stepText.replace(/\([^\)]*\)/g, '()');
+    stepText = stepText.replace(/\([^)]*\)/g, '()');
     // Special handling for builder pattern where parameters might be part of the fluent chain
     // This regex tries to find .methodName(ANYTHING_NOT_CLOSING_PARENTHESIS)
     // and replaces it with .methodName()
     // It's a bit more aggressive to catch chained calls that might have complex arguments.
-    stepText = stepText.replace(/\.([a-zA-Z0-9_]+)\([^)]*\)/g, '.\$1()');
+    stepText = stepText.replace(/\.([a-zA-Z0-9_]+)\([^)]*\)/g, '.$1()');
 
 
     output += `${index + 1}. ${stepText}\n`;

@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom'; // For navigation after submissi
 // import { Input } from "@/components/ui/input"; // Example shadcn/ui component
 // import { Button } from "@/components/ui/button"; // Example shadcn/ui component
 
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080/api';
+
 const RepoForm: React.FC = () => {
     const [gitUrl, setGitUrl] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -16,8 +18,7 @@ const RepoForm: React.FC = () => {
         setIsLoading(true);
         setError(null);
         try {
-            // Replace with your actual API endpoint from services/api.ts
-            const response = await axios.post('http://localhost:8080/api/repo/analyze', { gitUrl }); 
+            const response = await axios.post(`${API_BASE_URL}/analysis/analyze`, { repoUrl: gitUrl }); 
             console.log('Analysis started:', response.data);
             // Navigate to dashboard or display results
             // For now, let's assume the response contains a path or ID to the results

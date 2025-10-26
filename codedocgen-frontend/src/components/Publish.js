@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+const defaultApiBase = process.env.REACT_APP_API_URL || 'http://localhost:8080/api';
+const API_BASE_URL = (process.env.REACT_APP_PUBLISH_API_URL || defaultApiBase).replace(/\/+$/, '');
 
 const Publish = ({ repoName }) => {
   const [pageTitle, setPageTitle] = useState('');
@@ -38,21 +39,21 @@ const Publish = ({ repoName }) => {
     try {
       // Check API docs
       try {
-        const endpoints = await axios.get(`${API_BASE_URL}/api/repo/endpoints/${repoName}`);
+        const endpoints = await axios.get(`${API_BASE_URL}/repo/endpoints/${repoName}`);
         setSectionStatus(prev => ({ ...prev, api_docs: endpoints.data.controllers && Object.keys(endpoints.data.controllers).length > 0 ? 'available' : 'empty' }));
       } catch (e) {
         setSectionStatus(prev => ({ ...prev, api_docs: 'error' }));
       }
       // Check features
       try {
-        const featuresData = await axios.get(`${API_BASE_URL}/api/repo/features/${repoName}`);
+        const featuresData = await axios.get(`${API_BASE_URL}/repo/features/${repoName}`);
         setSectionStatus(prev => ({ ...prev, features: featuresData.data.features && featuresData.data.features.length > 0 ? 'available' : 'empty' }));
       } catch (e) {
         setSectionStatus(prev => ({ ...prev, features: 'error' }));
       }
       // Check flows
       try {
-        const flowsData = await axios.get(`${API_BASE_URL}/api/repo/flows/${repoName}`);
+        const flowsData = await axios.get(`${API_BASE_URL}/repo/flows/${repoName}`);
         setSectionStatus(prev => ({ ...prev, flows: flowsData.data.flows && Object.keys(flowsData.data.flows).length > 0 ? 'available' : 'empty' }));
       } catch (e) {
         setSectionStatus(prev => ({ ...prev, flows: 'error' }));
@@ -133,7 +134,7 @@ const Publish = ({ repoName }) => {
         return;
       }
       
-      const response = await axios.post(`${API_BASE_URL}/api/repo/publish/confluence`, {
+      const response = await axios.post(`${API_BASE_URL}/repo/publish/confluence`, {
         repo_name: repoName,
         page_title: pageTitle || `API Documentation for ${repoName}`,
         space_key: spaceKey,
