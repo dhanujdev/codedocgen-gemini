@@ -1,13 +1,7 @@
 {
-  "builds": [
-    {
-      "src": "codedocgen-frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "codedocgen-frontend/build"
-      }
-    }
-  ],
+  "installCommand": "cd codedocgen-frontend && npm install",
+  "buildCommand": "cd codedocgen-frontend && npm run build",
+  "outputDirectory": "codedocgen-frontend/build",
   "routes": [
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
